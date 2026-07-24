@@ -22,7 +22,9 @@ router = APIRouter(prefix="/optimizer", tags=["optimizer"])
 def advise_skills(
     payload: SkillAdviceRequest, db: Session = Depends(get_db)
 ) -> SkillAdviceResponse:
-    result = skill_advisor.advise_for_account(db, payload.account_id, payload.candidate_skill_ids)
+    result = skill_advisor.advise_for_account(
+        db, payload.account_id, payload.candidate_skill_ids, payload.objective
+    )
 
     ranking = [
         SkillScoreBreakdown(
@@ -30,6 +32,7 @@ def advise_skills(
             name=scored.option.name,
             skill_type=scored.option.skill_type,
             score=scored.score,
+            summary=scored.summary,
             reasons=list(scored.reasons),
         )
         for scored in result.ranked

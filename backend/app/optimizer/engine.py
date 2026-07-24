@@ -18,6 +18,9 @@ dependency on anything outside `app.optimizer`.
 
 from __future__ import annotations
 
+import math
+
+from app.optimizer import weights
 from app.optimizer.context import BuildContext
 
 
@@ -49,3 +52,30 @@ def utility_score(context: BuildContext) -> float:
     (see `StatType` in `app/domain/models/enums.py`)."""
 
     return context.resource_gain
+
+
+def aoe_score(context: BuildContext) -> float:
+    """Damage-output potential against *multiple* enemies at once —
+    extra projectiles and ricochet/bounce hits multiply how much of a
+    screen one attack covers, which `offense_score` (single-target DPS)
+    does not capture at all. `PROJECTILE_AOE_FACTOR` and
+    `BOUNCE_AOE_FACTOR` are deliberately different weights so a
+    projectile-count skill and a bounce-count skill of the same tier
+    don't come out identical — see `weights.py`.
+
+    Scaled by `sqrt` rather than linearly: the *first* extra projectile
+    or bounce covers proportionally more new ground than the fifth
+    (there are only so many enemies on screen to hit twice). This is
+    also what makes an account's *already-selected* projectile/bounce
+    skills (folded into `BuildContext.projectile_count`/`bounce_count`
+    by `build_context`) change how much a *new* candidate with the same
+    effect is worth — see
+    `tests/backend/test_optimizer_skill_advisor.py::test_existing_selected_skill_reduces_marginal_value_of_a_similar_new_one`.
+    """
+
+    extra_projectiles = max(0.0, context.projectile_count - 1.0)
+    bounce_count = max(0.0, context.bounce_count)
+    return context.attack * (
+        math.sqrt(extra_projectiles) * weights.PROJECTILE_AOE_FACTOR
+        + math.sqrt(bounce_count) * weights.BOUNCE_AOE_FACTOR
+    )

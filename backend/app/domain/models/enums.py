@@ -81,3 +81,36 @@ class SkillType(enum.StrEnum):
     DEFENSIVE = "defensive"
     UTILITY = "utility"
     MOVEMENT = "movement"
+
+
+class EffectType(enum.StrEnum):
+    """A structured, mechanical effect a skill grants (`SkillEffect.effect_type`).
+
+    This is what lets the Optimizer Engine (`app/optimizer/`) tell two
+    same-tier, same-category skills apart — e.g. Multishot
+    (``PROJECTILE_COUNT``) versus Ricochet (``BOUNCE_COUNT``) versus
+    Attack Up (``ATTACK_SPEED_MULTIPLIER``) — instead of scoring every
+    OFFENSIVE skill identically. Kept generic (one row per effect on
+    `SkillEffect`, rather than a column per possible effect on `Skill`)
+    so a skill can carry more than one effect and a new effect type can
+    be introduced without a schema migration touching `Skill` itself.
+
+    Each member maps to exactly one `app.optimizer.context.BuildContext`
+    field (`app.optimizer.context._EFFECT_TYPE_FIELD`) that the
+    Optimizer Engine's build simulator adds the effect's value onto.
+
+    GAME DATA PLACEHOLDER: this is a realistic-shaped set of mechanical
+    levers, not a transcription of Archero 2's actual skill effect data.
+    """
+
+    PROJECTILE_COUNT = "projectile_count"
+    BOUNCE_COUNT = "bounce_count"
+    ATTACK_SPEED_MULTIPLIER = "attack_speed_multiplier"
+    CRIT_CHANCE_BONUS = "crit_chance_bonus"
+    CRIT_DAMAGE_BONUS = "crit_damage_bonus"
+    DEFENSE_BONUS = "defense_bonus"
+    MAX_HP_BONUS = "max_hp_bonus"
+    DODGE_BONUS = "dodge_bonus"
+    MOVEMENT_SPEED_BONUS = "movement_speed_bonus"
+    RESOURCE_GAIN_BONUS = "resource_gain_bonus"
+    LIFE_STEAL_BONUS = "life_steal_bonus"

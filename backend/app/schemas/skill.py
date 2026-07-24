@@ -6,7 +6,16 @@ import datetime as dt
 
 from pydantic import BaseModel, ConfigDict
 
-from app.domain.models.enums import SkillType
+from app.domain.models.enums import EffectType, SkillType
+
+
+class SkillEffectRead(BaseModel):
+    """Serialized representation of one `SkillEffect` row."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    effect_type: EffectType
+    value: float
 
 
 class SkillRead(BaseModel):
@@ -19,5 +28,6 @@ class SkillRead(BaseModel):
     skill_type: SkillType
     tier: int
     description: str | None
+    effects: list[SkillEffectRead]
     created_at: dt.datetime
     updated_at: dt.datetime

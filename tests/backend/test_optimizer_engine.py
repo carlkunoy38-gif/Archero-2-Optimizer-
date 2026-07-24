@@ -70,3 +70,39 @@ def test_mobility_score_combines_movement_speed_and_dodge() -> None:
 
 def test_utility_score_is_resource_gain() -> None:
     assert engine.utility_score(_context(resource_gain=42.0)) == 42.0
+
+
+def test_aoe_score_is_zero_with_no_extra_projectiles_or_bounces() -> None:
+    # projectile_count defaults to 1.0 (the baseline single projectile) —
+    # that alone should contribute nothing to aoe_score.
+    assert engine.aoe_score(_context(attack=500.0)) == 0.0
+
+
+def test_aoe_score_scales_with_extra_projectiles_but_with_diminishing_returns() -> None:
+    zero_extra = engine.aoe_score(_context(attack=100.0, projectile_count=1.0))
+    one_extra = engine.aoe_score(_context(attack=100.0, projectile_count=2.0))
+    two_extra = engine.aoe_score(_context(attack=100.0, projectile_count=3.0))
+
+    first_gain = one_extra - zero_extra
+    second_gain = two_extra - one_extra
+
+    assert first_gain > 0.0
+    # Diminishing returns: the second extra projectile is worth less
+    # than the first — this is what lets an account's *already
+    # selected* projectile skills change how much a new one is worth.
+    assert 0.0 < second_gain < first_gain
+
+
+def test_aoe_score_scales_with_bounce_count() -> None:
+    assert engine.aoe_score(_context(attack=100.0, bounce_count=2.0)) > 0.0
+
+
+def test_aoe_score_weighs_projectiles_and_bounces_differently() -> None:
+    # Equal-magnitude projectile vs. bounce bonuses should not produce
+    # the same aoe_score — otherwise a PROJECTILE_COUNT skill and a
+    # BOUNCE_COUNT skill of the same tier would still tie.
+    from_projectile = engine.aoe_score(_context(attack=100.0, projectile_count=2.0))
+    from_bounce = engine.aoe_score(_context(attack=100.0, bounce_count=1.0))
+    assert from_projectile != from_bounce
+    assert from_projectile > 0.0
+    assert from_bounce > 0.0

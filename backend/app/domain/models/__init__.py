@@ -12,6 +12,7 @@ from app.domain.models.armor import Armor
 from app.domain.models.chapter import Chapter
 from app.domain.models.enums import (
     ArmorSlot,
+    EffectType,
     HeroClass,
     Rarity,
     RuneType,
@@ -23,6 +24,7 @@ from app.domain.models.pet import Pet
 from app.domain.models.ring import Ring
 from app.domain.models.rune import Rune
 from app.domain.models.skill import Skill
+from app.domain.models.skill_effect import SkillEffect
 from app.domain.models.user_account import (
     UserAccount,
     UserAmuletOwnership,
@@ -42,6 +44,7 @@ __all__ = [
     "Armor",
     "ArmorSlot",
     "Chapter",
+    "EffectType",
     "Hero",
     "HeroClass",
     "Pet",
@@ -50,6 +53,7 @@ __all__ = [
     "Rune",
     "RuneType",
     "Skill",
+    "SkillEffect",
     "SkillType",
     "StatType",
     "UserAccount",

@@ -16,11 +16,15 @@ from app.domain.models import (
     Amulet,
     Armor,
     Chapter,
+    EffectType,
     Hero,
     Pet,
     Ring,
     Rune,
     RuneType,
+    Skill,
+    SkillEffect,
+    SkillType,
     StatType,
     UserAccount,
     UserAmuletOwnership,
@@ -29,6 +33,7 @@ from app.domain.models import (
     UserPetOwnership,
     UserRingOwnership,
     UserRuneOwnership,
+    UserSkillSelection,
     UserWeaponOwnership,
     Weapon,
 )
@@ -57,6 +62,9 @@ def test_build_context_on_empty_account_is_all_zero(db: Session, account: UserAc
     assert context.resource_gain == 0.0
     assert context.recommended_combat_power is None
     assert context.power_gap_ratio == 1.0
+    assert context.projectile_count == 1.0
+    assert context.bounce_count == 0.0
+    assert context.selected_skill_ids == frozenset()
 
 
 def test_build_context_uses_active_hero_scaled_by_level(
@@ -230,3 +238,70 @@ def test_power_gap_ratio_defaults_to_neutral_without_current_chapter(
 
     assert context.recommended_combat_power is None
     assert context.power_gap_ratio == 1.0
+
+
+def test_build_context_folds_equipped_skill_effects_into_totals(
+    db: Session, account: UserAccount
+) -> None:
+    multishot = Skill(name="Multishot", skill_type=SkillType.OFFENSIVE, tier=3)
+    multishot.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    db.add(multishot)
+    db.commit()
+    db.add(
+        UserSkillSelection(
+            account_id=account.id, skill_id=multishot.id, is_unlocked=True, equipped_slot=0
+        )
+    )
+    db.commit()
+
+    context = build_context(_load(db, account.id))
+
+    assert context.projectile_count == 2.0
+    assert context.selected_skill_ids == frozenset({multishot.id})
+
+
+def test_build_context_sums_effects_across_multiple_equipped_skills(
+    db: Session, account: UserAccount
+) -> None:
+    first = Skill(name="Multishot", skill_type=SkillType.OFFENSIVE, tier=3)
+    first.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    second = Skill(name="Front Arrow", skill_type=SkillType.OFFENSIVE, tier=2)
+    second.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    db.add_all([first, second])
+    db.commit()
+    db.add(
+        UserSkillSelection(
+            account_id=account.id, skill_id=first.id, is_unlocked=True, equipped_slot=0
+        )
+    )
+    db.add(
+        UserSkillSelection(
+            account_id=account.id, skill_id=second.id, is_unlocked=True, equipped_slot=1
+        )
+    )
+    db.commit()
+
+    context = build_context(_load(db, account.id))
+
+    assert context.projectile_count == 3.0
+    assert context.selected_skill_ids == frozenset({first.id, second.id})
+
+
+def test_build_context_ignores_unlocked_but_unequipped_skill(
+    db: Session, account: UserAccount
+) -> None:
+    multishot = Skill(name="Multishot", skill_type=SkillType.OFFENSIVE, tier=3)
+    multishot.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    db.add(multishot)
+    db.commit()
+    db.add(
+        UserSkillSelection(
+            account_id=account.id, skill_id=multishot.id, is_unlocked=True, equipped_slot=None
+        )
+    )
+    db.commit()
+
+    context = build_context(_load(db, account.id))
+
+    assert context.projectile_count == 1.0
+    assert context.selected_skill_ids == frozenset()

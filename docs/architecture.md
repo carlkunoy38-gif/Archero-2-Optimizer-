@@ -455,21 +455,125 @@ not a hunt through every advisor for a hardcoded constant.
 
 ### Why the Skill Advisor never uses a static tier list
 
-`score_skill` never branches on a skill's *name*. It scores any `Skill` catalog row
-using only its `skill_type` (offensive/defensive/utility/movement) and `tier`,
-combined with the account's `BuildContext`: an offensive skill is worth more the
-harder the build already hits (it compounds with existing offense); a defensive skill
-is worth more the more deficient the build's current survivability is relative to a
-baseline (diminishing returns — the first points of survivability matter more than the
-hundredth); a utility skill scales with the build's resource gain; a movement skill is
-worth more the more under-powered the account is for its current chapter
-(`power_gap_ratio`). This is why the same three candidate skills, offered to two
-accounts with different real builds, can and do produce a different *recommended*
-skill — proven end-to-end in
-`tests/backend/test_optimizer_skill_advisor.py::test_same_candidates_rank_differently_for_different_builds`
-and `test_advise_for_account_reflects_real_db_backed_builds`. Adding a new skill to the
-catalog needs zero code changes to the advisor — it works purely from
-`skill_type`/`tier`, whatever row is thrown at it.
+`score_skill` never branches on a skill's *name*. Every candidate gets a small
+tier-based baseline (`weights.SKILL_TIER_BASE_VALUE * skill.tier`) plus a
+*build-simulated marginal gain* — see "Module 3.1: effect-based marginal scoring"
+immediately below for what that means and why the original category-based version of
+this section was replaced.
+
+## Module 3.1: effect-based marginal scoring
+
+Module 3 shipped with `score_skill` branching on a candidate's `skill_type`
+(offensive/defensive/utility/movement) — an offensive skill scored higher the harder
+the build already hit, a defensive skill scored higher the squishier the build was, and
+so on. A review of that version correctly identified its ceiling: **every skill of the
+same type and tier scored identically.** Multishot, Ricochet, and Attack Up — all
+OFFENSIVE, all tier 3 — got the exact same number for any given build, because nothing
+in the model looked past `skill_type`/`tier`. The engine could answer "is an offensive
+pick good for this build" but not "is *this* offensive pick better than *that* one,"
+which is the actual question a player asks when the game offers a specific named
+choice. Module 3.1 replaces the category-branching formula with a marginal
+build-simulation model that answers the second question.
+
+### The mechanism: simulate the pick, then measure the difference
+
+1. **`SkillEffect`** (`app/domain/models/skill_effect.py`) gives a `Skill` catalog row
+   zero or more structured, typed effects — `EffectType.PROJECTILE_COUNT`,
+   `BOUNCE_COUNT`, `ATTACK_SPEED_MULTIPLIER`, and so on
+   (`app/domain/models/enums.py`) — instead of only a `skill_type` category. This is
+   what actually distinguishes Multishot (`PROJECTILE_COUNT`) from Ricochet
+   (`BOUNCE_COUNT`) from Attack Up (`ATTACK_SPEED_MULTIPLIER`) at the data level. One
+   row per effect, not a column per possible effect on `Skill`, so a skill can carry
+   more than one effect and a new effect type never needs a migration touching `Skill`
+   itself — the same reasoning that gave `Ring`/`Amulet`/`Pet` a generic `StatType`
+   instead of one column each.
+2. **`BuildContext`** (`app/optimizer/context.py`) gained `projectile_count` (baseline
+   `1.0` — every build has at least one projectile) and `bounce_count` (baseline
+   `0.0`), plus `selected_skill_ids`. `build_context()` now folds the effects of the
+   account's *already-equipped* skills (`UserSkillSelection.equipped_slot is not
+   None` — the same "equipped, not merely unlocked/owned" test every other ownership
+   type in this project uses) into these fields, the same way it already folded in
+   equipped gear. This is what makes an account's existing skill choices part of its
+   build, not invisible to it — the review's second-biggest finding.
+3. **`app.optimizer.simulator.apply_skill(context, skill)`** (new, pure, no I/O)
+   projects one *candidate* skill's effects onto a **copy** of a `BuildContext` — same
+   field-mapping table (`context._EFFECT_TYPE_FIELD`) `build_context` uses for
+   already-equipped skills, just applied to a hypothetical addition instead of the
+   real baseline.
+4. **`app.optimizer.objectives.ObjectiveProfile`** (new) is a named weighting of
+   `engine.py`'s dimensions into one scalar — `BALANCED`, `BOSS` (weights single-target
+   `offense_score` heavily), `FARM` (weights the new `aoe_score`/`utility_score`
+   heavily), `SURVIVAL` (weights `defense_score` heavily). "What good means" depends on
+   what the player is actually doing right now, which a single fixed formula can't
+   express.
+5. **`score_skill`** (`app/optimizer/advisors/skill_advisor.py`) now computes
+   `objective.evaluate(context)` before and after `simulator.apply_skill`, and the
+   *difference* — not a category-based synergy formula — is the skill's marginal
+   value, added on top of the tier baseline. A skill with no `SkillEffect` rows yet
+   simply has zero marginal gain and falls back to tier-only scoring — an honest,
+   graceful degradation rather than a crash, exercised by
+   `tests/backend/test_optimizer_skill_advisor.py::test_skill_with_no_effects_falls_back_to_tier_only_score`.
+
+`engine.py` gained one new primitive, `aoe_score`, rather than being thrown away —
+single-target `offense_score` doesn't capture "hits multiple enemies at once," which is
+exactly what `PROJECTILE_COUNT`/`BOUNCE_COUNT` effects are for. It scales by `sqrt` of
+the extra projectile/bounce count, not linearly: the first extra projectile covers
+proportionally more new ground than the fifth, and — not incidentally — this is the
+concrete mechanism by which an account's *already-selected* skills change how much a
+*new*, similar one is worth (a second `PROJECTILE_COUNT` pick has a smaller marginal
+`aoe_score` gain than the first), which
+`test_existing_selected_skill_reduces_marginal_value_of_a_similar_new_one` proves
+directly. `PROJECTILE_AOE_FACTOR` and `BOUNCE_AOE_FACTOR` (`weights.py`) are
+deliberately different constants specifically so a projectile-count skill and a
+bounce-count skill of identical tier don't collapse back to the same score —
+`test_same_type_same_tier_skills_can_rank_differently` is the test that exists purely
+to keep this property true.
+
+### Two audiences for "why": `summary` versus `reasons`
+
+`ScoredOption` (`app/optimizer/results.py`) gained a `summary: str` field alongside the
+existing `reasons: tuple[str, ...]`. They answer different questions for different
+readers: `summary` is one player-facing sentence ("Ricochet mainly boosts your
+bounce/ricochet count — estimated farm objective value for your current build:
++1.4."); `reasons` is the field-by-field numeric breakdown a developer debugging a
+recommendation would want. Neither is derived from the other by truncating — a review
+finding was that the original single `reasons` list was useful for debugging but not
+phrased for a player, and collapsing both audiences into one field would keep serving
+neither well.
+
+### Deterministic tie-breaking
+
+`advise()` now sorts by `(-score, skill.id)` instead of score alone. Two skills that
+happen to score identically (most visibly, two skills with no modeled effects and the
+same tier) previously kept whatever relative order they arrived in the candidate list —
+meaning `["Multishot", "Ricochet"]` and `["Ricochet", "Multishot"]` could recommend
+different skills for an identical build, which is not intelligence, it's request-order
+sensitivity. `test_advise_breaks_score_ties_deterministically_by_skill_id` locks this
+down.
+
+### What Module 3.1 deliberately still does not do
+
+The review that motivated this module also raised hero/weapon *identity* (`Ricochet
+works especially well with Dragon Bow`) and named-tag synergies between specific
+skills and specific gear. That is not implemented: it requires real data about which
+tags mean what for which weapons/heroes, which — like every other placeholder value in
+this project — does not exist yet, and inventing plausible-looking tag data would be
+indistinguishable from the static tier list this whole engine exists to avoid. The
+mechanism built here (structured effects, marginal simulation, objective profiles)
+is designed to carry that once real data exists — a weapon-specific synergy would be
+another `EffectType`-like structured fact feeding the same `apply_skill`/`evaluate`
+pipeline, not a different architecture. Talents, inventory, and resources (also named
+in the original Module 3 spec) are likewise not yet part of `BuildContext` and are left
+for a future pass once those catalog entities exist.
+
+One naming difference from the review's suggested `BuildSnapshot`/`BuildSimulator`/
+`ScoreBreakdown` class names worth calling out explicitly: this module uses module-level
+functions (`simulator.apply_skill`, `objectives.ObjectiveProfile.evaluate`) and the
+existing `BuildContext`/`ScoredOption` dataclasses rather than new classes for each
+concept. That mirrors `engine.py`'s existing style (plain functions over a `BuildContext`,
+no class hierarchy) rather than a deliberate rejection of the review's design — the
+behavior described in the review is what's implemented, under the project's established
+naming conventions instead of new ones introduced for this module alone.
 
 ## What's not decided yet
 

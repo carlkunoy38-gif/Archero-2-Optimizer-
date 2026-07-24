@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.domain.models import (
+    Skill,
     UserAccount,
     UserAmuletOwnership,
     UserArmorOwnership,
@@ -48,7 +49,9 @@ def get_account_with_detail(db: Session, account_id: int) -> UserAccount | None:
             selectinload(UserAccount.amulets).selectinload(UserAmuletOwnership.amulet),
             selectinload(UserAccount.pets).selectinload(UserPetOwnership.pet),
             selectinload(UserAccount.runes).selectinload(UserRuneOwnership.rune),
-            selectinload(UserAccount.skill_selections).selectinload(UserSkillSelection.skill),
+            selectinload(UserAccount.skill_selections)
+            .selectinload(UserSkillSelection.skill)
+            .selectinload(Skill.effects),
             selectinload(UserAccount.chapter_progress),
             selectinload(UserAccount.current_chapter),
         )

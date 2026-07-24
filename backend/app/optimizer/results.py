@@ -19,10 +19,17 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ScoredOption[T]:
-    """One candidate's score and the human-readable reasons behind it."""
+    """One candidate's score, plus two different audiences for "why":
+    `summary` is one player-facing sentence (what a coach would say out
+    loud), `reasons` is the detailed, numeric factor-by-factor breakdown
+    (what a developer debugging the recommendation would want). Neither
+    is derived from the other — an advisor builds both explicitly,
+    because "the biggest number in the breakdown" is not always the
+    clearest way to explain a decision to a player."""
 
     option: T
     score: float
+    summary: str
     reasons: tuple[str, ...]
 
 

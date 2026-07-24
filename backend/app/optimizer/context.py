@@ -1,6 +1,7 @@
 """BuildContext: a pure snapshot of one account's current build,
-aggregated from its active hero, equipped gear, socketed runes, and
-active pet — the one thing every advisor scores candidates against.
+aggregated from its active hero, equipped gear, socketed runes, active
+pet, and already-equipped skills' structured effects (`SkillEffect`) —
+the one thing every advisor scores candidates against.
 
 Building one requires no I/O of its own: `build_context` takes an
 already-loaded `UserAccount` ORM object (see
@@ -15,9 +16,9 @@ builds a `BuildContext` some other way entirely).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from app.domain.models import StatType, UserAccount
+from app.domain.models import EffectType, StatType, UserAccount
 from app.optimizer import weights
 
 #: Which BuildContext field each ring/amulet StatType feeds into. Not
@@ -37,6 +38,26 @@ _STAT_TYPE_FIELD: dict[StatType, str] = {
     StatType.LIFE_STEAL: "life_steal",
     StatType.DODGE: "dodge",
     StatType.RESOURCE_GAIN: "resource_gain",
+}
+
+#: Which BuildContext field a `SkillEffect.effect_type` feeds into.
+#: Shared between `build_context` (folding an account's already-equipped
+#: skills' effects into the baseline) and
+#: `app.optimizer.simulator.apply_skill` (projecting one *candidate*
+#: skill's effects onto a copy of the context) — both need the exact
+#: same mapping, so it lives here rather than being duplicated.
+_EFFECT_TYPE_FIELD: dict[EffectType, str] = {
+    EffectType.PROJECTILE_COUNT: "projectile_count",
+    EffectType.BOUNCE_COUNT: "bounce_count",
+    EffectType.ATTACK_SPEED_MULTIPLIER: "attack_speed",
+    EffectType.CRIT_CHANCE_BONUS: "crit_chance",
+    EffectType.CRIT_DAMAGE_BONUS: "crit_damage",
+    EffectType.DEFENSE_BONUS: "defense",
+    EffectType.MAX_HP_BONUS: "max_hp",
+    EffectType.DODGE_BONUS: "dodge",
+    EffectType.MOVEMENT_SPEED_BONUS: "movement_speed",
+    EffectType.RESOURCE_GAIN_BONUS: "resource_gain",
+    EffectType.LIFE_STEAL_BONUS: "life_steal",
 }
 
 
@@ -68,6 +89,22 @@ class BuildContext:
     combat_power: float
     recommended_combat_power: float | None
 
+    #: Extra simultaneous projectiles/bounces per attack, from skill
+    #: effects (`EffectType.PROJECTILE_COUNT` / `BOUNCE_COUNT`). `1.0` is
+    #: the baseline every build has (one projectile with no skills) —
+    #: `bounce_count` has no such baseline, since bouncing is purely
+    #: additive from skills. See `engine.aoe_score`.
+    projectile_count: float = 1.0
+    bounce_count: float = 0.0
+
+    #: IDs of the skills the account already has equipped (a non-null
+    #: `equipped_slot`, not merely unlocked). Their effects are already
+    #: folded into the numeric fields above by `build_context` — this is
+    #: for advisors that want to *explain* a recommendation in terms of
+    #: what's already selected (e.g. "you already have two projectile
+    #: skills, so a third is worth less"), not for scoring math itself.
+    selected_skill_ids: frozenset[int] = field(default_factory=frozenset)
+
     @property
     def power_gap_ratio(self) -> float:
         """`combat_power / recommended_combat_power` for the account's
@@ -89,7 +126,10 @@ def _star_multiplier(star_level: int) -> float:
 
 
 def build_context(account: UserAccount) -> BuildContext:
-    totals: dict[str, float] = dict.fromkeys(set(_STAT_TYPE_FIELD.values()), 0.0)
+    totals: dict[str, float] = dict.fromkeys(
+        set(_STAT_TYPE_FIELD.values()) | set(_EFFECT_TYPE_FIELD.values()), 0.0
+    )
+    totals["projectile_count"] = 1.0
 
     active_hero = next((h for h in account.heroes if h.is_active), None)
     hero_level = active_hero.level if active_hero is not None else 0
@@ -153,6 +193,16 @@ def build_context(account: UserAccount) -> BuildContext:
                 rune_ownership.level
             )
 
+    selected_skill_ids: set[int] = set()
+    for selection in account.skill_selections:
+        if selection.equipped_slot is None:
+            continue
+        selected_skill_ids.add(selection.skill_id)
+        for effect in selection.skill.effects:
+            effect_field = _EFFECT_TYPE_FIELD.get(effect.effect_type)
+            if effect_field is not None:
+                totals[effect_field] += effect.value
+
     recommended_power = (
         account.current_chapter.recommended_combat_power
         if account.current_chapter is not None
@@ -174,4 +224,7 @@ def build_context(account: UserAccount) -> BuildContext:
         resource_gain=totals["resource_gain"],
         combat_power=account.combat_power,
         recommended_combat_power=recommended_power,
+        projectile_count=totals["projectile_count"],
+        bounce_count=totals["bounce_count"],
+        selected_skill_ids=frozenset(selected_skill_ids),
     )

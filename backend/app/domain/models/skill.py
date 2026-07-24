@@ -19,6 +19,7 @@ from app.domain.models.enums import SkillType
 from app.domain.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from app.domain.models.skill_effect import SkillEffect
     from app.domain.models.user_account import UserSkillSelection
 
 
@@ -36,6 +37,9 @@ class Skill(TimestampMixin, Base):
 
     owner_links: Mapped[list[UserSkillSelection]] = relationship(
         back_populates="skill"
+    )
+    effects: Mapped[list[SkillEffect]] = relationship(
+        back_populates="skill", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid

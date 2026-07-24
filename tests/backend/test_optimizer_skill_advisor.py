@@ -1,12 +1,14 @@
 """Tests for `app.optimizer.advisors.skill_advisor`.
 
 The test that matters most here is
-`test_same_candidates_rank_differently_for_different_builds`: it proves
-the whole point of Module 3 — the same three skill choices, offered to
-two accounts with different real, DB-backed builds, produce a different
-*recommended* skill, not merely different scores. There is no static
-tier list anywhere in this module; the ranking is entirely a function of
-each account's aggregated `BuildContext`.
+`test_same_type_same_tier_skills_can_rank_differently`: the review of
+the original Module 3 cut correctly flagged that scoring by
+`skill_type`/`tier` alone meant Multishot, Ricochet, and Attack Up (all
+OFFENSIVE, all tier 3) were indistinguishable — the engine could tell
+"an offensive skill is good for this build" but not "*this* offensive
+skill is better than *that* one." Module 3.1's marginal-build-simulation
+model (`app.optimizer.simulator.apply_skill` +
+`app.optimizer.objectives.ObjectiveProfile`) is what fixes that.
 """
 
 from __future__ import annotations
@@ -16,14 +18,17 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.domain.models import (
+    EffectType,
     Hero,
     HeroClass,
     Rarity,
     Skill,
+    SkillEffect,
     SkillType,
     UserAccount,
     UserHeroOwnership,
 )
+from app.optimizer import objectives
 from app.optimizer.advisors import skill_advisor
 from app.optimizer.context import BuildContext
 
@@ -50,64 +55,141 @@ def _context(**overrides: float | int | None) -> BuildContext:
 
 
 @pytest.fixture()
-def offensive_skill(db: Session) -> Skill:
+def multishot_skill(db: Session) -> Skill:
     instance = Skill(name="Multishot", skill_type=SkillType.OFFENSIVE, tier=3)
+    instance.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
     db.add(instance)
     db.commit()
     return instance
 
 
 @pytest.fixture()
-def defensive_skill(db: Session) -> Skill:
-    instance = Skill(name="Iron Skin", skill_type=SkillType.DEFENSIVE, tier=3)
+def ricochet_skill(db: Session) -> Skill:
+    instance = Skill(name="Ricochet", skill_type=SkillType.OFFENSIVE, tier=3)
+    instance.effects = [SkillEffect(effect_type=EffectType.BOUNCE_COUNT, value=2.0)]
     db.add(instance)
     db.commit()
     return instance
 
 
 @pytest.fixture()
-def movement_skill(db: Session) -> Skill:
-    instance = Skill(name="Dash", skill_type=SkillType.MOVEMENT, tier=3)
+def attack_up_skill(db: Session) -> Skill:
+    instance = Skill(name="Attack Up", skill_type=SkillType.OFFENSIVE, tier=3)
+    instance.effects = [SkillEffect(effect_type=EffectType.ATTACK_SPEED_MULTIPLIER, value=0.15)]
     db.add(instance)
     db.commit()
     return instance
+
+
+@pytest.fixture()
+def no_effect_skill(db: Session) -> Skill:
+    """A catalog skill with no structured effects yet — the honest
+    tier-only fallback case."""
+    instance = Skill(name="Mystery Perk", skill_type=SkillType.OFFENSIVE, tier=3)
+    db.add(instance)
+    db.commit()
+    return instance
+
+
+def _fresh_build() -> BuildContext:
+    return _context(
+        attack=500.0,
+        defense=50.0,
+        max_hp=800.0,
+        attack_speed=0.5,
+        crit_chance=0.2,
+        crit_damage=1.5,
+        combat_power=1000.0,
+        recommended_combat_power=1000.0,
+    )
 
 
 # --- Pure `score_skill`/`advise` -------------------------------------------
 
 
-def test_offensive_skill_scores_higher_with_more_offense(offensive_skill: Skill) -> None:
-    weak = skill_advisor.score_skill(_context(attack=10.0), offensive_skill)
-    strong = skill_advisor.score_skill(_context(attack=1000.0), offensive_skill)
-    assert strong.score > weak.score
-
-
-def test_defensive_skill_scores_higher_the_more_deficient_the_build(
-    defensive_skill: Skill,
+def test_same_type_same_tier_skills_can_rank_differently(
+    multishot_skill: Skill, ricochet_skill: Skill, attack_up_skill: Skill
 ) -> None:
-    tanky = skill_advisor.score_skill(_context(max_hp=1000.0), defensive_skill)
-    squishy = skill_advisor.score_skill(_context(max_hp=10.0), defensive_skill)
-    assert squishy.score > tanky.score
+    context = _fresh_build()
+
+    scores = {
+        skill.name: skill_advisor.score_skill(context, skill).score
+        for skill in (multishot_skill, ricochet_skill, attack_up_skill)
+    }
+
+    assert len(set(scores.values())) == 3, (
+        f"expected three distinct scores for three same-type, same-tier skills, got {scores}"
+    )
 
 
-def test_movement_skill_scores_higher_when_underpowered(movement_skill: Skill) -> None:
-    underpowered = skill_advisor.score_skill(
-        _context(combat_power=100.0, recommended_combat_power=1000.0), movement_skill
+def test_skill_with_no_effects_falls_back_to_tier_only_score(no_effect_skill: Skill) -> None:
+    scored = skill_advisor.score_skill(_fresh_build(), no_effect_skill)
+
+    assert scored.score == 30.0  # SKILL_TIER_BASE_VALUE (10.0) * tier (3), zero marginal gain
+    assert "tier-only" in scored.reasons[-1].lower()
+
+
+def test_boss_objective_favors_single_target_skill(
+    ricochet_skill: Skill, attack_up_skill: Skill
+) -> None:
+    result = skill_advisor.advise(
+        _fresh_build(), [ricochet_skill, attack_up_skill], objectives.BOSS
     )
-    on_pace = skill_advisor.score_skill(
-        _context(combat_power=1000.0, recommended_combat_power=1000.0), movement_skill
+    assert result.recommended.option is attack_up_skill
+
+
+def test_farm_objective_favors_aoe_skill_over_the_same_build(
+    ricochet_skill: Skill, attack_up_skill: Skill
+) -> None:
+    result = skill_advisor.advise(
+        _fresh_build(), [ricochet_skill, attack_up_skill], objectives.FARM
     )
-    assert underpowered.score > on_pace.score
+    assert result.recommended.option is ricochet_skill
+
+
+def test_boss_and_farm_objectives_flip_the_recommendation_for_the_same_build(
+    ricochet_skill: Skill, attack_up_skill: Skill
+) -> None:
+    """The Module 3.1 analogue of Module 3's build-flip test: this time
+    the build is held constant and the *objective* changes, which is
+    exactly the "boss fight vs. farming" distinction the review asked
+    for."""
+
+    context = _fresh_build()
+    candidates = [ricochet_skill, attack_up_skill]
+
+    boss_result = skill_advisor.advise(context, candidates, objectives.BOSS)
+    farm_result = skill_advisor.advise(context, candidates, objectives.FARM)
+
+    assert boss_result.recommended.option is not farm_result.recommended.option
+
+
+def test_existing_selected_skill_reduces_marginal_value_of_a_similar_new_one(
+    multishot_skill: Skill,
+) -> None:
+    """An account that already has one PROJECTILE_COUNT skill equipped
+    (`projectile_count` baseline of 2.0 instead of 1.0) should value a
+    *second* one less — diminishing returns, and the concrete mechanism
+    by which "already selected skills" changes a recommendation, per the
+    review."""
+
+    fresh = _fresh_build()
+    already_stacked = _context(**{**vars(fresh), "projectile_count": 2.0})
+
+    fresh_score = skill_advisor.score_skill(fresh, multishot_skill, objectives.FARM).score
+    stacked_score = skill_advisor.score_skill(
+        already_stacked, multishot_skill, objectives.FARM
+    ).score
+
+    assert stacked_score < fresh_score
 
 
 def test_advise_ranks_best_option_first(
-    offensive_skill: Skill, defensive_skill: Skill, movement_skill: Skill
+    multishot_skill: Skill, ricochet_skill: Skill, attack_up_skill: Skill
 ) -> None:
     result = skill_advisor.advise(
-        _context(attack=5000.0, attack_speed=1.0),
-        [offensive_skill, defensive_skill, movement_skill],
+        _fresh_build(), [multishot_skill, ricochet_skill, attack_up_skill]
     )
-    assert result.recommended.option is offensive_skill
     assert [scored.score for scored in result.ranked] == sorted(
         (scored.score for scored in result.ranked), reverse=True
     )
@@ -118,39 +200,40 @@ def test_advise_requires_at_least_one_candidate() -> None:
         skill_advisor.advise(_context(), [])
 
 
-def test_same_candidates_rank_differently_for_different_builds(
-    offensive_skill: Skill, defensive_skill: Skill, movement_skill: Skill
-) -> None:
-    """The core Module 3 requirement: no static tier list. The exact
-    same three candidate skills must be able to produce a different
-    *recommended* skill depending on the build they're scored against."""
+def test_advise_breaks_score_ties_deterministically_by_skill_id(db: Session) -> None:
+    """Two skills with genuinely identical effects (and therefore
+    identical scores) must not have their relative order depend on
+    which order they were submitted in."""
 
-    glass_cannon = _context(attack=2000.0, attack_speed=1.0, defense=100.0, max_hp=600.0)
-    underdog = _context(attack=200.0, defense=0.0, max_hp=50.0)
+    first = Skill(name="Twin A", skill_type=SkillType.OFFENSIVE, tier=2)
+    first.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    second = Skill(name="Twin B", skill_type=SkillType.OFFENSIVE, tier=2)
+    second.effects = [SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=1.0)]
+    db.add_all([first, second])
+    db.commit()
+    assert first.id < second.id
 
-    candidates = [offensive_skill, defensive_skill, movement_skill]
-    cannon_result = skill_advisor.advise(glass_cannon, candidates)
-    underdog_result = skill_advisor.advise(underdog, candidates)
+    context = _fresh_build()
+    forward = skill_advisor.advise(context, [first, second])
+    backward = skill_advisor.advise(context, [second, first])
 
-    assert cannon_result.recommended.option is offensive_skill
-    assert underdog_result.recommended.option is defensive_skill
-    assert cannon_result.recommended.option is not underdog_result.recommended.option
+    assert forward.recommended.option.id == backward.recommended.option.id == first.id
 
 
 # --- DB-aware `advise_for_account` -----------------------------------------
 
 
 @pytest.fixture()
-def strong_account(db: Session) -> UserAccount:
-    account = UserAccount(display_name="strong")
+def account_with_hero(db: Session) -> UserAccount:
+    account = UserAccount(display_name="carl")
     hero_row = Hero(
-        name="Strong Hero",
+        name="Hero",
         hero_class=HeroClass.WARRIOR,
         rarity=Rarity.EPIC,
-        base_attack=2000.0,
-        base_defense=100.0,
-        base_hp=600.0,
-        base_attack_speed=1.0,
+        base_attack=500.0,
+        base_defense=50.0,
+        base_hp=800.0,
+        base_attack_speed=0.5,
     )
     db.add_all([account, hero_row])
     db.commit()
@@ -159,60 +242,64 @@ def strong_account(db: Session) -> UserAccount:
     return account
 
 
-@pytest.fixture()
-def weak_account(db: Session) -> UserAccount:
-    account = UserAccount(display_name="weak")
-    hero_row = Hero(
-        name="Weak Hero",
-        hero_class=HeroClass.WARRIOR,
-        rarity=Rarity.COMMON,
-        base_attack=200.0,
-        base_defense=0.0,
-        base_hp=50.0,
-        base_attack_speed=0.0,
-    )
-    db.add_all([account, hero_row])
-    db.commit()
-    db.add(UserHeroOwnership(account_id=account.id, hero_id=hero_row.id, level=1, is_active=True))
-    db.commit()
-    return account
-
-
-def test_advise_for_account_reflects_real_db_backed_builds(
+def test_advise_for_account_respects_objective_parameter(
     db: Session,
-    strong_account: UserAccount,
-    weak_account: UserAccount,
-    offensive_skill: Skill,
-    defensive_skill: Skill,
-    movement_skill: Skill,
+    account_with_hero: UserAccount,
+    ricochet_skill: Skill,
+    attack_up_skill: Skill,
 ) -> None:
-    candidate_ids = [offensive_skill.id, defensive_skill.id, movement_skill.id]
+    candidate_ids = [ricochet_skill.id, attack_up_skill.id]
 
-    strong_result = skill_advisor.advise_for_account(db, strong_account.id, candidate_ids)
-    weak_result = skill_advisor.advise_for_account(db, weak_account.id, candidate_ids)
+    boss_result = skill_advisor.advise_for_account(
+        db, account_with_hero.id, candidate_ids, "boss"
+    )
+    farm_result = skill_advisor.advise_for_account(
+        db, account_with_hero.id, candidate_ids, "farm"
+    )
 
-    assert strong_result.recommended.option.id == offensive_skill.id
-    assert weak_result.recommended.option.id == defensive_skill.id
+    assert boss_result.recommended.option.id == attack_up_skill.id
+    assert farm_result.recommended.option.id == ricochet_skill.id
+
+
+def test_advise_for_account_defaults_to_balanced_objective(
+    db: Session, account_with_hero: UserAccount, multishot_skill: Skill
+) -> None:
+    result = skill_advisor.advise_for_account(db, account_with_hero.id, [multishot_skill.id])
+    assert result.recommended.option.id == multishot_skill.id
+
+
+def test_advise_for_account_raises_not_found_for_unknown_objective(
+    db: Session, account_with_hero: UserAccount, multishot_skill: Skill
+) -> None:
+    with pytest.raises(NotFoundError):
+        skill_advisor.advise_for_account(
+            db, account_with_hero.id, [multishot_skill.id], "nonsense"
+        )
 
 
 def test_advise_for_account_raises_not_found_for_missing_account(
-    db: Session, offensive_skill: Skill
+    db: Session, multishot_skill: Skill
 ) -> None:
     with pytest.raises(NotFoundError):
-        skill_advisor.advise_for_account(db, 999999, [offensive_skill.id])
+        skill_advisor.advise_for_account(db, 999999, [multishot_skill.id])
 
 
 def test_advise_for_account_raises_not_found_for_missing_skill(
-    db: Session, weak_account: UserAccount
+    db: Session, account_with_hero: UserAccount
 ) -> None:
     with pytest.raises(NotFoundError):
-        skill_advisor.advise_for_account(db, weak_account.id, [999999])
+        skill_advisor.advise_for_account(db, account_with_hero.id, [999999])
 
 
 def test_advise_for_account_deduplicates_candidate_ids(
-    db: Session, weak_account: UserAccount, offensive_skill: Skill, defensive_skill: Skill
+    db: Session,
+    account_with_hero: UserAccount,
+    multishot_skill: Skill,
+    ricochet_skill: Skill,
 ) -> None:
     result = skill_advisor.advise_for_account(
-        db, weak_account.id, [offensive_skill.id, offensive_skill.id, defensive_skill.id]
+        db,
+        account_with_hero.id,
+        [multishot_skill.id, multishot_skill.id, ricochet_skill.id],
     )
     assert len(result.ranked) == 2

@@ -1,120 +1,169 @@
 """Skill Advisor: given the skill choices Archero 2 offers mid-run,
 ranks them for one account's *current* build — never a static tier
-list. The same candidate skills can, and should, rank differently for
-two accounts with different gear: see
-`tests/backend/test_optimizer_skill_advisor.py::test_same_candidates_rank_differently_for_different_builds`
-for exactly that case, which is the actual point of this module.
+list, and never treating every skill of the same `skill_type`/`tier` as
+interchangeable.
 
-How a skill is scored: every skill gets a baseline from its catalog
-`tier`, then a build-specific synergy bonus determined by its
-`skill_type` — an OFFENSIVE skill is worth more the harder your build
-already hits (it compounds), a DEFENSIVE skill is worth more the
-squishier your build currently is (diminishing-returns logic: you get
-more from your first points of survivability than your hundredth), a
-UTILITY skill scales with resource gain, and a MOVEMENT skill is worth
-more the more under-powered you are for your current chapter. All of
-the actual numbers are in `app/optimizer/weights.py` — nothing here is
-a hardcoded per-skill-name rule, which means this works for any row in
-the `Skill` catalog, present or future, without code changes.
+How a skill is scored (Module 3.1 — see "The Optimizer Engine" in
+docs/architecture.md for the full rationale): every skill gets a
+baseline from its catalog `tier`, then a *marginal* build-simulation
+bonus — `simulator.apply_skill` projects the skill's structured
+`SkillEffect` rows onto a copy of the build, `objective.evaluate` scores
+the build before and after, and the difference is what the skill is
+actually worth for this specific build and objective. This is what lets
+two skills of the same type and tier (Multishot's extra projectile
+versus Ricochet's bounce) score differently, and lets an account's
+*already-equipped* skills (folded into `BuildContext` by
+`build_context`) change how much a new candidate is worth.
+
+A skill with no modeled `SkillEffect` rows falls back to tier-only
+scoring — the marginal gain is simply zero — which degrades gracefully
+rather than crashing, but is honestly weaker intelligence than a skill
+with real effect data. See
+`tests/backend/test_optimizer_skill_advisor.py::test_same_type_same_tier_skills_can_rank_differently`
+for the case this whole module exists to get right.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
 
-from app.domain.models import Skill, SkillType
-from app.optimizer import engine, weights
+from app.core.exceptions import NotFoundError
+from app.domain.models import Skill
+from app.optimizer import objectives, simulator, weights
 from app.optimizer.context import BuildContext, build_context
+from app.optimizer.objectives import ObjectiveProfile
 from app.optimizer.results import AdvisorResult, ScoredOption
 from app.services import account_service, catalog_service
 
+#: Player-facing description of what changed, keyed by `BuildContext`
+#: field name. Only fields a skill effect can actually move need an
+#: entry; a changed field with no entry falls back to its raw name.
+_FIELD_DESCRIPTION: dict[str, str] = {
+    "attack": "raw attack",
+    "defense": "defense",
+    "max_hp": "max HP",
+    "attack_speed": "attack speed",
+    "crit_chance": "crit chance",
+    "crit_damage": "crit damage",
+    "movement_speed": "movement speed",
+    "life_steal": "life steal",
+    "dodge": "dodge chance",
+    "resource_gain": "resource gain",
+    "projectile_count": "projectile count",
+    "bounce_count": "bounce/ricochet count",
+}
 
-def score_skill(context: BuildContext, skill: Skill) -> ScoredOption[Skill]:
-    """Score one candidate skill against a build. Pure function — no I/O
-    — so it's directly unit-testable without a database."""
 
-    reasons: list[str] = [
-        f"Tier {skill.tier} baseline value: {weights.SKILL_TIER_BASE_VALUE * skill.tier:.1f}"
-    ]
-    score = weights.SKILL_TIER_BASE_VALUE * skill.tier
+def _changed_fields(
+    before: BuildContext, after: BuildContext
+) -> dict[str, tuple[float, float]]:
+    changed: dict[str, tuple[float, float]] = {}
+    for f in dataclasses.fields(before):
+        if f.name not in _FIELD_DESCRIPTION:
+            continue
+        old_value = getattr(before, f.name)
+        new_value = getattr(after, f.name)
+        if new_value != old_value:
+            changed[f.name] = (old_value, new_value)
+    return changed
 
-    if skill.skill_type == SkillType.OFFENSIVE:
-        offense = engine.offense_score(context)
-        bonus = offense * weights.OFFENSIVE_SYNERGY_FACTOR
+
+def _summarize(
+    skill: Skill,
+    objective: ObjectiveProfile,
+    changed: dict[str, tuple[float, float]],
+    gain: float,
+) -> str:
+    if not changed:
+        return f"{skill.name} has no modeled effects yet, so it's ranked on its tier alone."
+    dominant_field = max(changed, key=lambda name: abs(changed[name][1] - changed[name][0]))
+    description = _FIELD_DESCRIPTION.get(dominant_field, dominant_field)
+    return (
+        f"{skill.name} mainly boosts your {description} — estimated {objective.name} "
+        f"objective value for your current build: {gain:+.1f}."
+    )
+
+
+def score_skill(
+    context: BuildContext, skill: Skill, objective: ObjectiveProfile = objectives.BALANCED
+) -> ScoredOption[Skill]:
+    """Score one candidate skill against a build and objective. Pure
+    function — no I/O — so it's directly unit-testable without a
+    database."""
+
+    tier_bonus = weights.SKILL_TIER_BASE_VALUE * skill.tier
+    before = objective.evaluate(context)
+    simulated = simulator.apply_skill(context, skill)
+    after = objective.evaluate(simulated)
+    marginal_gain = after - before
+
+    changed = _changed_fields(context, simulated)
+    reasons: list[str] = [f"Tier {skill.tier} baseline value: {tier_bonus:.1f}"]
+    if changed:
+        for field_name, (old_value, new_value) in changed.items():
+            description = _FIELD_DESCRIPTION.get(field_name, field_name)
+            reasons.append(
+                f"{description}: {old_value:.2f} -> {new_value:.2f} "
+                f"({new_value - old_value:+.2f})"
+            )
         reasons.append(
-            f"Offensive skill, scaled by your build's offense score ({offense:.1f}): +{bonus:.1f}"
+            f"Marginal '{objective.name}' objective gain from simulating this pick: "
+            f"{marginal_gain:+.2f}"
         )
-        score += bonus
+    else:
+        reasons.append("No structured SkillEffect rows on this skill — tier-only score.")
 
-    elif skill.skill_type == SkillType.DEFENSIVE:
-        defense = engine.defense_score(context)
-        deficiency = max(0.0, weights.DEFENSIVE_SCORE_BASELINE - defense)
-        bonus = deficiency * weights.DEFENSIVE_SYNERGY_FACTOR
-        if deficiency > 0:
-            reasons.append(
-                f"Defensive skill: your build's defense score ({defense:.1f}) is below the "
-                f"{weights.DEFENSIVE_SCORE_BASELINE:.0f} baseline, so this covers a real gap: "
-                f"+{bonus:.1f}"
-            )
-        else:
-            reasons.append(
-                f"Defensive skill: your build's defense score ({defense:.1f}) already covers "
-                "the baseline, so this adds little: +0.0"
-            )
-        score += bonus
-
-    elif skill.skill_type == SkillType.UTILITY:
-        utility = engine.utility_score(context)
-        bonus = utility * weights.UTILITY_SYNERGY_FACTOR
-        reasons.append(
-            f"Utility skill, scaled by your build's resource gain ({utility:.1f}): +{bonus:.1f}"
-        )
-        score += bonus
-
-    elif skill.skill_type == SkillType.MOVEMENT:
-        gap = context.power_gap_ratio
-        underpowered = max(0.0, 1.0 - gap)
-        bonus = underpowered * weights.MOVEMENT_SYNERGY_FACTOR
-        if underpowered > 0:
-            reasons.append(
-                f"Movement skill: you're under-powered for your current chapter "
-                f"(power ratio {gap:.2f}), so mobility/survival is worth more right now: "
-                f"+{bonus:.1f}"
-            )
-        else:
-            reasons.append(
-                f"Movement skill: you're at or above the recommended power for your current "
-                f"chapter (power ratio {gap:.2f}), so mobility is less urgent: +0.0"
-            )
-        score += bonus
-
-    return ScoredOption(option=skill, score=score, reasons=tuple(reasons))
+    return ScoredOption(
+        option=skill,
+        score=tier_bonus + marginal_gain,
+        summary=_summarize(skill, objective, changed, marginal_gain),
+        reasons=tuple(reasons),
+    )
 
 
-def advise(context: BuildContext, candidates: Sequence[Skill]) -> AdvisorResult[Skill]:
-    """Rank every candidate for this build, best first."""
+def advise(
+    context: BuildContext,
+    candidates: Sequence[Skill],
+    objective: ObjectiveProfile = objectives.BALANCED,
+) -> AdvisorResult[Skill]:
+    """Rank every candidate for this build and objective, best first.
+
+    Ties (equal score) break on catalog `id` ascending — a deterministic
+    tiebreak so the *order candidates were submitted in* never changes
+    the recommendation, unlike a plain stable sort on score alone."""
 
     if not candidates:
         raise ValueError("advise() requires at least one candidate skill")
 
-    scored = [score_skill(context, skill) for skill in candidates]
-    scored.sort(key=lambda scored_option: scored_option.score, reverse=True)
+    scored = [score_skill(context, skill, objective) for skill in candidates]
+    scored.sort(key=lambda scored_option: (-scored_option.score, scored_option.option.id))
     return AdvisorResult(ranked=tuple(scored))
 
 
 def advise_for_account(
-    db: Session, account_id: int, candidate_skill_ids: Sequence[int]
+    db: Session,
+    account_id: int,
+    candidate_skill_ids: Sequence[int],
+    objective_name: str = "balanced",
 ) -> AdvisorResult[Skill]:
     """DB-aware entry point: loads the account's build and the candidate
-    catalog rows (raising `NotFoundError` for a missing account or skill
-    id, via the same services the rest of the API uses), then delegates
-    to the pure `advise` above.
+    catalog rows (raising `NotFoundError` for a missing account, skill
+    id, or objective name, via the same services the rest of the API
+    uses), then delegates to the pure `advise` above.
     """
 
     account = account_service.get_account_detail(db, account_id)
     context = build_context(account)
+    try:
+        objective = objectives.BY_NAME[objective_name]
+    except KeyError:
+        known = ", ".join(sorted(objectives.BY_NAME))
+        raise NotFoundError(
+            f"Unknown objective {objective_name!r}; expected one of: {known}"
+        ) from None
 
     seen: set[int] = set()
     candidates: list[Skill] = []
@@ -124,4 +173,4 @@ def advise_for_account(
         seen.add(skill_id)
         candidates.append(catalog_service.get_skill(db, skill_id))
 
-    return advise(context, candidates)
+    return advise(context, candidates, objective)

@@ -67,10 +67,18 @@ starting a new one.
    takes a `BuildContext` and a `Sequence` of whatever catalog type this advisor
    compares, returns `AdvisorResult[T]` (`app/optimizer/results.py`). No `Session`, no
    FastAPI import — this is what makes the advisor usable outside a web request later
-   (mobile app, overlay, screenshot pipeline). If comparing candidates needs a
-   dimension `app/optimizer/engine.py`'s primitives don't cover yet (offense/defense/
-   mobility/utility score), add the primitive there — don't compute it ad hoc inside
-   the advisor.
+   (mobile app, overlay, screenshot pipeline). Prefer a **marginal** score over a
+   category-based one wherever the candidate has (or could have) structured effects: as
+   the Skill Advisor did in Module 3 versus Module 3.1, scoring by a broad category
+   (`skill_type`) alone means every candidate in that category scores identically —
+   simulate the candidate's effect on a copy of the context
+   (`app.optimizer.simulator.apply_skill` is the pattern to follow, or a sibling
+   `apply_*` for a new candidate type) and compare an `ObjectiveProfile.evaluate()`
+   (`app/optimizer/objectives.py`) before and after, rather than hand-writing a
+   per-category synergy formula. If comparing candidates needs a dimension
+   `app/optimizer/engine.py`'s primitives don't cover yet (offense/defense/mobility/
+   utility/aoe score), add the primitive there — don't compute it ad hoc inside the
+   advisor.
 2. **Every number the advisor's formula needs** goes in `app/optimizer/weights.py`, not
    inline in the advisor module — and gets the same `GAME DATA PLACEHOLDER` treatment
    as the rest of the catalog if it's not a real, sourced game value yet.
@@ -84,11 +92,16 @@ starting a new one.
    if the advisor doesn't fit that module), registered in `app/api/router.py`.
 5. **Tests**: pure unit tests against hand-built `BuildContext` instances for the
    scoring formula itself (fast, exact expected numbers — see
-   `tests/backend/test_optimizer_skill_advisor.py`), plus at least one test that
-   proves the advisor's recommendation is genuinely build-dependent — the same
-   candidates must produce a *different* top recommendation for two differently-built
-   accounts, not just different scores. That property, not raw code coverage, is what
-   actually proves "no static tier list."
+   `tests/backend/test_optimizer_skill_advisor.py`), plus at least the properties that
+   actually prove "no static tier list," not just raw code coverage:
+   - the same candidates must produce a *different* top recommendation for two
+     differently-built accounts, or for the same account under two different
+     `ObjectiveProfile`s, not just different scores;
+   - two candidates in the *same* category/tier must be able to score differently once
+     they carry different structured effects (`test_same_type_same_tier_skills_can_rank_differently`
+     is the reference case);
+   - tied scores must break deterministically (e.g. by catalog id), so candidate
+     submission order never changes the recommendation.
 
 ## Conventions
 

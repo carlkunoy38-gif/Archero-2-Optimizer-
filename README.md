@@ -23,12 +23,20 @@ This repository is being built module by module. Completed so far:
       before — all under a versioned prefix (`/api/v1`), with a consistent JSON error
       envelope and OpenAPI docs at `/docs`.
 - [x] **Module 3 — Optimizer Engine**: a standalone, UI-independent decision engine
-      (`app/optimizer/`) that aggregates an account's hero/gear/runes/pet into a
+      (`app/optimizer/`) that aggregates an account's hero/gear/runes/pet/skills into a
       `BuildContext` and scores candidate options against it — never a static tier
       list. First advisor: the Skill Advisor (`POST /optimizer/skills/advise`), which
       ranks candidate in-run skill choices and explains why, using only the account's
       actual current build. Designed to carry future advisors (Gear, Farm, Upgrade,
-      Rune, Resource) on the same engine; see `docs/architecture.md`.
+      Rune, Resource) on the same engine.
+- [x] **Module 3.1 — Effect-based marginal scoring**: skills now carry structured
+      `SkillEffect` rows (projectile count, bounce count, attack speed, ...) instead of
+      only a broad category, so two same-tier, same-category skills (Multishot vs.
+      Ricochet vs. Attack Up) score differently. The advisor simulates adding each
+      candidate to the build (`app.optimizer.simulator.apply_skill`) and measures the
+      marginal gain against an `ObjectiveProfile` (balanced/boss/farm/survival) rather
+      than a fixed formula — see "Module 3.1: effect-based marginal scoring" in
+      `docs/architecture.md`.
 - [ ] **Module 4** — React + TypeScript + Tailwind frontend (Dashboard, My Account,
       Build Optimizer, Upgrade Advisor, Settings).
 - [ ] **Module 5** — Real game data seeding (see "Game data" below).
