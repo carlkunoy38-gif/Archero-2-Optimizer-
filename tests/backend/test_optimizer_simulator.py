@@ -88,3 +88,69 @@ def test_apply_skill_only_touches_fields_its_effects_target() -> None:
     assert result.attack_speed == pytest.approx(0.3)
     assert result.attack == 50.0
     assert result.defense == 30.0
+
+
+# --- replace_contribution: the generic gear-swap/level-up primitive --------
+
+
+def test_replace_contribution_with_empty_before_is_a_pure_addition() -> None:
+    context = _context(attack=100.0)
+
+    result = simulator.replace_contribution(context, before={}, after={"attack": 50.0})
+
+    assert result.attack == 150.0
+
+
+def test_replace_contribution_with_empty_after_is_a_pure_removal() -> None:
+    context = _context(attack=100.0)
+
+    result = simulator.replace_contribution(context, before={"attack": 40.0}, after={})
+
+    assert result.attack == 60.0
+
+
+def test_replace_contribution_swaps_one_items_stats_for_anothers() -> None:
+    # e.g. unequipping a weapon contributing {attack: 80, crit_chance: 0.1}
+    # in favor of one contributing {attack: 60, attack_speed: 0.3}.
+    context = _context(attack=200.0, crit_chance=0.2, attack_speed=0.5)
+
+    result = simulator.replace_contribution(
+        context,
+        before={"attack": 80.0, "crit_chance": 0.1},
+        after={"attack": 60.0, "attack_speed": 0.3},
+    )
+
+    assert result.attack == 180.0  # 200 - 80 + 60
+    assert result.crit_chance == pytest.approx(0.1)  # 0.2 - 0.1 (removed, nothing added)
+    assert result.attack_speed == pytest.approx(0.8)  # 0.5 + 0.3 (added, nothing removed)
+
+
+def test_replace_contribution_with_identical_before_and_after_is_a_no_op() -> None:
+    context = _context(attack=100.0, defense=50.0)
+    same = {"attack": 30.0, "defense": 10.0}
+
+    result = simulator.replace_contribution(context, before=same, after=dict(same))
+
+    assert result == context
+
+
+def test_replace_contribution_does_not_mutate_the_original_context() -> None:
+    context = _context(attack=100.0)
+
+    simulator.replace_contribution(context, before={}, after={"attack": 999.0})
+
+    assert context.attack == 100.0
+
+
+def test_apply_skill_delegates_to_replace_contribution_with_empty_before() -> None:
+    # apply_skill is documented as a pure addition via replace_contribution
+    # — verify the two give identical results for the same effect.
+    skill = _skill(SkillEffect(effect_type=EffectType.PROJECTILE_COUNT, value=2.0))
+    context = _context(attack=10.0)
+
+    via_apply_skill = simulator.apply_skill(context, skill)
+    via_replace_contribution = simulator.replace_contribution(
+        context, before={}, after={"projectile_count": 2.0}
+    )
+
+    assert via_apply_skill == via_replace_contribution

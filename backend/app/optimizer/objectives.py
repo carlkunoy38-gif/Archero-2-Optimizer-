@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.exceptions import NotFoundError
 from app.optimizer import engine, weights
 from app.optimizer.context import BuildContext
 
@@ -85,3 +86,17 @@ SURVIVAL = _from_weights("survival")
 BY_NAME: dict[str, ObjectiveProfile] = {
     profile.name: profile for profile in (BALANCED, BOSS, FARM, SURVIVAL)
 }
+
+
+def resolve(name: str) -> ObjectiveProfile:
+    """Look up an objective by name, raising `NotFoundError` (a 404 at
+    the API layer, same as a missing account or catalog row) for an
+    unknown one — every advisor's `advise_for_account` calls this
+    instead of indexing `BY_NAME` itself, so the error message and
+    behavior for "unknown objective" can't drift between advisors."""
+
+    try:
+        return BY_NAME[name]
+    except KeyError:
+        known = ", ".join(sorted(BY_NAME))
+        raise NotFoundError(f"Unknown objective {name!r}; expected one of: {known}") from None

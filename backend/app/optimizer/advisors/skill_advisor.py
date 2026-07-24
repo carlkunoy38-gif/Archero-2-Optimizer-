@@ -25,66 +25,16 @@ for the case this whole module exists to get right.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
 from app.domain.models import Skill
-from app.optimizer import objectives, simulator, weights
+from app.optimizer import explanations, objectives, simulator, weights
 from app.optimizer.context import BuildContext, build_context
 from app.optimizer.objectives import ObjectiveProfile
 from app.optimizer.results import AdvisorResult, ScoredOption
 from app.services import account_service, catalog_service
-
-#: Player-facing description of what changed, keyed by `BuildContext`
-#: field name. Only fields a skill effect can actually move need an
-#: entry; a changed field with no entry falls back to its raw name.
-_FIELD_DESCRIPTION: dict[str, str] = {
-    "attack": "raw attack",
-    "defense": "defense",
-    "max_hp": "max HP",
-    "attack_speed": "attack speed",
-    "crit_chance": "crit chance",
-    "crit_damage": "crit damage",
-    "movement_speed": "movement speed",
-    "life_steal": "life steal",
-    "dodge": "dodge chance",
-    "resource_gain": "resource gain",
-    "projectile_count": "projectile count",
-    "bounce_count": "bounce/ricochet count",
-}
-
-
-def _changed_fields(
-    before: BuildContext, after: BuildContext
-) -> dict[str, tuple[float, float]]:
-    changed: dict[str, tuple[float, float]] = {}
-    for f in dataclasses.fields(before):
-        if f.name not in _FIELD_DESCRIPTION:
-            continue
-        old_value = getattr(before, f.name)
-        new_value = getattr(after, f.name)
-        if new_value != old_value:
-            changed[f.name] = (old_value, new_value)
-    return changed
-
-
-def _summarize(
-    skill: Skill,
-    objective: ObjectiveProfile,
-    changed: dict[str, tuple[float, float]],
-    gain: float,
-) -> str:
-    if not changed:
-        return f"{skill.name} has no modeled effects yet, so it's ranked on its tier alone."
-    dominant_field = max(changed, key=lambda name: abs(changed[name][1] - changed[name][0]))
-    description = _FIELD_DESCRIPTION.get(dominant_field, dominant_field)
-    return (
-        f"{skill.name} mainly boosts your {description} — estimated {objective.name} "
-        f"objective value for your current build: {gain:+.1f}."
-    )
 
 
 def score_skill(
@@ -100,27 +50,20 @@ def score_skill(
     after = objective.evaluate(simulated)
     marginal_gain = after - before
 
-    changed = _changed_fields(context, simulated)
-    reasons: list[str] = [f"Tier {skill.tier} baseline value: {tier_bonus:.1f}"]
-    if changed:
-        for field_name, (old_value, new_value) in changed.items():
-            description = _FIELD_DESCRIPTION.get(field_name, field_name)
-            reasons.append(
-                f"{description}: {old_value:.2f} -> {new_value:.2f} "
-                f"({new_value - old_value:+.2f})"
-            )
-        reasons.append(
-            f"Marginal '{objective.name}' objective gain from simulating this pick: "
-            f"{marginal_gain:+.2f}"
-        )
-    else:
-        reasons.append("No structured SkillEffect rows on this skill — tier-only score.")
+    changed = explanations.changed_fields(context, simulated)
+    reasons = explanations.build_reasons(
+        f"Tier {skill.tier} baseline value: {tier_bonus:.1f}",
+        changed,
+        objective.name,
+        marginal_gain,
+    )
+    summary = explanations.build_summary(skill.name, changed, objective.name, marginal_gain)
 
     return ScoredOption(
         option=skill,
         score=tier_bonus + marginal_gain,
-        summary=_summarize(skill, objective, changed, marginal_gain),
-        reasons=tuple(reasons),
+        summary=summary,
+        reasons=reasons,
     )
 
 
@@ -157,13 +100,7 @@ def advise_for_account(
 
     account = account_service.get_account_detail(db, account_id)
     context = build_context(account)
-    try:
-        objective = objectives.BY_NAME[objective_name]
-    except KeyError:
-        known = ", ".join(sorted(objectives.BY_NAME))
-        raise NotFoundError(
-            f"Unknown objective {objective_name!r}; expected one of: {known}"
-        ) from None
+    objective = objectives.resolve(objective_name)
 
     seen: set[int] = set()
     candidates: list[Skill] = []

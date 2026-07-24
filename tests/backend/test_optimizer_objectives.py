@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from app.core.exceptions import NotFoundError
 from app.optimizer import objectives
 from app.optimizer.context import BuildContext
 
@@ -66,3 +69,12 @@ def test_evaluate_boosts_mobility_weight_when_underpowered() -> None:
     )
 
     assert objectives.BALANCED.evaluate(underpowered) > objectives.BALANCED.evaluate(on_pace)
+
+
+def test_resolve_returns_the_matching_profile() -> None:
+    assert objectives.resolve("farm") is objectives.FARM
+
+
+def test_resolve_raises_not_found_for_an_unknown_name() -> None:
+    with pytest.raises(NotFoundError):
+        objectives.resolve("nonsense")

@@ -636,10 +636,191 @@ backend's own equip endpoints return the full updated resource rather than a dif
 
 ### What's not decided yet
 
-The Gear Advisor, Farm Advisor, Upgrade Advisor, Rune Advisor, and Resource Advisor
-called for in the Module 3 spec are not built yet — each would add one module under
-`app/optimizer/advisors/`, reusing `engine.py`'s primitives, without changing
-`context.py`, `engine.py`, or `results.py`; the Dashboard/Upgrade Advisor/Settings
-frontend pages stay placeholders until they do. The weighting model in `weights.py` in
+A Rune Advisor and Resource Advisor from the original Module 3 spec are still not
+built — Module 5 (below) implemented Gear, Upgrade, and Chapter Advisors, but a
+standalone rune-socketing recommender and a resource-spending recommender remain
+future modules once there's a concrete resource model to reuse from Upgrade Advisor
+(see "Gold as the one upgrade currency" below). The weighting model in `weights.py` in
 particular is meant to be revisited once real game data is available — see the root
 README's "Game data" section.
+
+## Module 5: Gear, Upgrade, and Chapter Advisors
+
+Module 5's spec was explicit that no new decision engine may be created — Gear,
+Upgrade, and Chapter Advisors all have to be built the same way Skill Advisor is: pure
+`score_*`/`advise` functions over a `BuildContext` and an `ObjectiveProfile`, plus a
+DB-aware `advise_for_account` wrapper, reusing `engine.py`/`simulator.py` rather than
+each inventing its own notion of "how much is this worth." Getting there required
+generalizing three pieces of `skill_advisor.py` that were originally written
+skill-specific, then building each new advisor directly on the generalized version —
+not parallel, independently-written logic that happens to look similar.
+
+### Generalizing "simulate a change": `context.py`'s contribution functions
+
+`build_context()` used to compute each equipped item's stat contribution inline, as
+one-off arithmetic inside its own loop bodies — correct for "what does the account
+have right now," but useless for "what would owning a *different* item, or the *same*
+item at a higher level, look like," which is exactly what Gear Advisor and Upgrade
+Advisor need to answer. `context.py` now exposes that arithmetic as standalone, pure
+functions — `hero_contribution(hero, level)`, `weapon_contribution(weapon, level,
+star_level)`, `armor_contribution(armor, level, star_level)`,
+`stat_item_contribution(stat_type, value, level)` (shared by ring/amulet/pet — same
+"one `StatType` and magnitude, scaled by level" shape for all three),
+`rune_contribution(rune_type, effect_value, level)`, and `skill_effect_contribution(skill)`
+— each taking a catalog row plus whatever level/star it should be evaluated at, not an
+ownership row specifically. `build_context()` now calls these same functions for
+whatever is *currently* equipped (via a small `_add(contribution)` accumulator), and
+Gear/Upgrade Advisors call the exact same functions for owned-but-unequipped items or
+hypothetical higher levels. There is exactly one formula for "how much attack does a
+weapon at level 5, 2 stars add," not a copy living inside `build_context` and a second,
+subtly-different one inside the new advisors.
+
+### Generalizing "apply the change": `simulator.replace_contribution`
+
+`simulator.py` used to have exactly one function, `apply_skill`, specific to "add a
+skill's effects on top of the baseline." Module 5 generalized it to
+`replace_contribution(context, before, after)` — given what a build currently gets
+from something (`before`) and what it would get instead (`after`), both as
+`{field_name: value}` dicts, it returns a new `BuildContext` with the difference
+applied via `dataclasses.replace`, changing nothing when `before == after`. Every
+advisor's "simulate this candidate" step is one call to it, with `before`/`after`
+meaning something different per advisor but the mechanism identical:
+
+- **Skill Advisor**: `before={}`, `after=skill_effect_contribution(candidate_skill)` —
+  purely additive, since picking a new skill never removes an existing one.
+  `apply_skill` is now a two-line wrapper around this call, kept only because
+  "apply_skill" reads better at its own call sites than a raw `replace_contribution`
+  invocation would.
+- **Gear Advisor**: `before=<what's currently equipped contributes>`,
+  `after=<what this candidate would contribute>` — a genuine swap, since equipping one
+  weapon un-equips whatever was there.
+- **Upgrade Advisor**: `before=<item at its current level>`, `after=<the same item at
+  the highest level the account can currently afford>` — a swap against itself at a
+  different level, not a different item.
+
+### Generalizing "explain the change": `explanations.py`
+
+`skill_advisor.py` originally had its own private `_FIELD_DESCRIPTION`/
+`_changed_fields`/`_summarize` helpers for turning a before/after `BuildContext` pair
+into player-facing text. Gear and Upgrade Advisors needed exactly the same thing, so
+that logic moved out into `app/optimizer/explanations.py` — the shared "explanation
+system" the Module 5 spec asked for by name — and `skill_advisor.py` was refactored to
+call it rather than keep its own copy (proving the extraction was genuine reuse, not
+just aspirational sharing). `changed_fields(before, after)` diffs every field
+`FIELD_DESCRIPTION` knows how to describe; `dominant_field` picks the single largest
+mover for a one-sentence summary; `build_reasons`/`build_summary` render the numeric
+`reasons` breakdown and the player-facing `summary` sentence respectively, honestly
+saying "no measurable stat change" rather than inventing something to say when a
+candidate's effects don't move any tracked field. Chapter Advisor is the one exception
+— scoring a chapter isn't a before/after `BuildContext` diff at all (see below), so it
+builds its `reasons`/`summary` by hand instead of forcing that shape onto a genuinely
+different kind of question.
+
+### `objectives.resolve`: one place that turns a bad objective name into 404
+
+All four advisors accept an `objective_name: str` at their `advise_for_account`
+boundary and need the identical "look it up in `BY_NAME`, or raise `NotFoundError`"
+handling. That's now `objectives.resolve(name)`, replacing what had started as a
+copy-pasted `try/except KeyError` in each advisor module.
+
+### Gear Advisor: comparing owned items, no tier list
+
+`app/optimizer/advisors/gear_advisor.py` ranks an account's *owned* weapons, armor
+(scoped to one `ArmorSlot` at a time — a helmet and a pair of boots never compete),
+rings, amulets, or pets. Candidates always come from the account's own ownership rows,
+never a client-submitted id list the way Skill Advisor's `candidate_skill_ids` works —
+there is no "equip an item you don't have" in this game, so what's biddable is entirely
+determined by what's owned. `score_item` builds a hypothetical `BuildContext` with
+`replace_contribution` (swapping the currently-equipped item's contribution for the
+candidate's) and scores that hypothetical context directly with the chosen
+`ObjectiveProfile` — an absolute score, not a delta, since real gear already has real
+numbers and needs no tier-based baseline to fall back on the way an effect-less skill
+does. "Switching to a worse item scores lower than keeping the current one" falls out
+of this for free: the currently-equipped item is just another candidate scored the same
+way, not a specially privileged baseline.
+
+### Upgrade Advisor: gold as the one upgrade currency, worthless upgrades filtered out
+
+`app/optimizer/advisors/upgrade_advisor.py` considers leveling up any owned hero,
+weapon, armor piece, ring, amulet, pet, or rune. The spec's example currency ("40
+Weapon Scrolls") assumes a scroll economy that doesn't exist yet in this project's
+domain model (`UserAccount` has `gold`, not per-category scroll counts) — rather than
+inventing a fictional scroll resource, gold is used as the one real, already-modeled
+upgrade currency, with `weights.BASE_UPGRADE_COST_PER_LEVEL` (a **GAME DATA
+PLACEHOLDER**, like every other tunable in `weights.py`) standing in for whatever the
+real per-item gold/scroll cost curve turns out to be. `max_affordable_levels` computes
+how many levels of `BASE_UPGRADE_COST_PER_LEVEL * level` the account's current gold
+covers, capped at `weights.MAX_UPGRADE_LEVELS_CONSIDERED` — an item that can't even
+afford one level is never scored at all, not scored low. `score_upgrade` reports its
+`score` as the *percentage* build improvement (`(after - before) / before * 100`),
+matching the spec's own example phrasing ("Expected build improvement: +8.7%")
+directly rather than a raw objective-score delta. "If an upgrade isn't optimal, it
+must not be recommended" is enforced in `advise_for_account`, not `advise`: `advise()`
+still ranks whatever candidates it's given (raising `ValueError` for an empty list, the
+same contract every advisor's pure function keeps), but `advise_for_account` filters
+the *result* down to `score > 0` afterward, raising `NotFoundError` if nothing
+affordable is actually worth doing — an affordable-but-worthless upgrade never reaches
+the ranking a client sees.
+
+### Chapter Advisor: two genuinely different questions, one shared mechanism
+
+`app/optimizer/advisors/chapter_advisor.py` answers both "best chapter to farm" and
+"best chapter to clear next" — deliberately *not* the same formula reused with
+different weights, because they're different questions: farming wants somewhere
+comfortable and cheap to repeat; progression wants the *furthest* chapter still safely
+reachable at all. `app/optimizer/chapter_scoring.py` holds the primitives this needs,
+kept separate from `engine.py` because they're functions of `(BuildContext, Chapter)`,
+not `BuildContext` alone the way every `engine.py` primitive is:
+`power_gap_for_chapter` (a per-chapter version of `BuildContext.power_gap_ratio`),
+`clear_safety(gap)` (0.0 at or below `weights.MIN_SAFE_POWER_GAP_RATIO`, ramping
+linearly to 1.0 at the chapter's recommended power), `farm_suitability` (the build's
+`ObjectiveProfile`-weighted strength, scaled down by clear safety and by energy cost —
+a chapter that costs more energy per attempt is worth less per unit of grinding time),
+and `progression_suitability` (rewards a *further* chapter's recommended power, but
+only in proportion to how safely reachable it currently is — an unreachable chapter
+scores 0 regardless of distance, never "the furthest option anyway"). `score_chapter`
+picks between the two formulas by checking `objective.name == "farm"` — the same
+`ObjectiveProfile` every other advisor takes, since "farm" already means "weigh
+resource efficiency over raw single-target power" everywhere else in the engine, so
+reusing it here for "which chapter" rather than "which skill/gear/upgrade" is the same
+concept applied to a new dimension, not a new one invented for this advisor.
+
+**Composing with Upgrade Advisor for the "upgrade first" case.** When the top
+*progression* pick (`objective.name != "farm"`) is currently unsafe
+(`clear_safety <= 0` — the account is under-powered for it), `advise_for_account`
+cross-calls `upgrade_advisor.advise_for_account` and folds its top recommendation into
+that chapter's `summary`/`reasons` (`_with_upgrade_suggestion`), producing exactly the
+spec's example shape ("Recommendation: Upgrade weapon first... Then continue on
+Chapter 24") without a new response shape or a second, chapter-advisor-local copy of
+"what's the best upgrade right now" logic. If nothing is currently affordable or
+worthwhile to upgrade either, the chapter recommendation is returned as-is (the
+cross-call's `NotFoundError` is caught, not propagated) — an accurate "here's the
+best chapter, no upgrade advice available right now" is better than a hard failure
+for a real, valid account state. Farm mode never triggers this cross-call at all: an
+unsafe farming target isn't the "you're behind, upgrade first" signal progression mode
+needs — farming already picks the safest chapter available by construction.
+
+### API and tests
+
+All three advisors are wired up the same way Skill Advisor is: `POST
+/api/v1/optimizer/gear/advise`, `/upgrade/advise`, and `/chapters/advise`
+(`app/api/routes/optimizer.py`), each a thin translation from its `AdvisorResult[T]`
+into a `*AdviceResponse`/`*ScoreBreakdown` pair (`app/schemas/optimizer.py`) — no
+decision logic in the route handlers themselves. `GearAdviceRequest` uses a
+`@model_validator` to reject (422) an `armor` category request with no `armor_slot`,
+mirroring how `equipment_service.equip_armor` itself requires a slot to scope
+replacement. `tests/backend/test_optimizer_contribution_functions.py`,
+`test_optimizer_simulator.py`, `test_optimizer_explanations.py`,
+`test_optimizer_gear_advisor.py`, `test_optimizer_upgrade_advisor.py`, and
+`test_optimizer_chapter_advisor.py` cover the new pure functions and DB-aware
+`advise_for_account` paths directly; `test_api_optimizer.py` covers all three new
+endpoints' happy paths, 404s (missing account, unknown objective, nothing owned/
+affordable, empty chapter catalog), and the armor-without-slot 422 — the same shape of
+coverage Skill Advisor already had.
+
+### What's not decided yet
+
+The Gear/Upgrade/Chapter Advisor frontend pages don't exist yet — Module 4 only wired
+up My Account and Build Optimizer against real endpoints, so Dashboard/Upgrade
+Advisor/Settings remain the honest placeholders described above until a future module
+gives them real pages to call these new endpoints from.

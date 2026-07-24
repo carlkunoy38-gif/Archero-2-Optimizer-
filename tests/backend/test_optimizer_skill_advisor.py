@@ -126,7 +126,7 @@ def test_skill_with_no_effects_falls_back_to_tier_only_score(no_effect_skill: Sk
     scored = skill_advisor.score_skill(_fresh_build(), no_effect_skill)
 
     assert scored.score == 30.0  # SKILL_TIER_BASE_VALUE (10.0) * tier (3), zero marginal gain
-    assert "tier-only" in scored.reasons[-1].lower()
+    assert "no measurable stat change" in scored.reasons[-1].lower()
 
 
 def test_boss_objective_favors_single_target_skill(

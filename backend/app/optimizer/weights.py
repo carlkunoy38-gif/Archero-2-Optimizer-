@@ -83,3 +83,38 @@ UNDERPOWERED_MOBILITY_BOOST = 1.0
 #: docs/architecture.md for why tier is only the floor, not the whole
 #: score, now that skills carry structured effects.
 SKILL_TIER_BASE_VALUE = 10.0
+
+# --- Upgrade Advisor (app/optimizer/advisors/upgrade_advisor.py) -----------
+
+#: Gold cost of taking an item from level L to L+1 is
+#: `BASE_UPGRADE_COST_PER_LEVEL * L` — cost grows linearly with the
+#: item's current level, a common shape for mobile-game upgrade curves.
+#: There is no real per-item gold-cost data available (the catalog has
+#: no cost column at all), so this is a single global placeholder rather
+#: than a claim about any specific item's real cost.
+BASE_UPGRADE_COST_PER_LEVEL = 50.0
+
+#: How many levels ahead the Upgrade Advisor considers buying for a
+#: single item in one recommendation, even with unlimited gold — caps
+#: the affordability search and keeps "spend everything on one item" from
+#: producing an unbounded number of levels.
+MAX_UPGRADE_LEVELS_CONSIDERED = 10
+
+# --- Chapter Advisor (app/optimizer/chapter_scoring.py) --------------------
+
+#: Below this `power_gap_ratio` (combat_power / chapter's
+#: recommended_combat_power), a chapter is considered too risky to
+#: recommend at all (`clear_safety` returns 0). Above 1.0 (at or over
+#: the recommended power), safety is already maximal — there's no
+#: separate "over-powered" bonus.
+MIN_SAFE_POWER_GAP_RATIO = 0.7
+
+#: Scales `farm_suitability`'s combined
+#: `objective-weighted-build-score * safety * energy-efficiency` into a
+#: score of a similar order of magnitude to the other advisors.
+FARM_SCORE_SCALE = 50.0
+
+#: Scales `progression_suitability`'s
+#: `recommended_combat_power * safety` into a score of a similar order
+#: of magnitude to the other advisors.
+PROGRESSION_SCORE_SCALE = 0.05

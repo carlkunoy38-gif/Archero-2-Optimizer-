@@ -168,8 +168,10 @@ and the actual migration scripts stay in sync; test both.
 
 - **A page either calls the real API or it's a `PlaceholderPage`.** Never wire a page
   up to fabricated/hardcoded data to make it look done — Dashboard, Upgrade Advisor,
-  and Settings are `PlaceholderPage`s specifically because their backend endpoints
-  don't exist yet, not because building the UI was skipped. See "Frontend
+  and Settings are `PlaceholderPage`s because no frontend page calls their backend
+  endpoints yet (Upgrade Advisor's own endpoint now exists as of Module 5 — see
+  "Module 5: Gear, Upgrade, and Chapter Advisors" in `docs/architecture.md` — but no
+  page consumes it yet), not because building the UI was skipped. See "Frontend
   architecture" in `docs/architecture.md`.
 - **Ownership-shaped UI is one generic component, not one per catalog type** — see
   `OwnershipSection.tsx`, instantiated per type in `MyAccountPage.tsx`, and the two

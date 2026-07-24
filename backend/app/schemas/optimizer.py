@@ -6,9 +6,11 @@ dataclasses, not Pydantic models — into API-serializable shapes.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.models.enums import SkillType
+from app.domain.models.enums import ArmorSlot, SkillType
+from app.optimizer.advisors.gear_advisor import GearCategory
+from app.optimizer.advisors.upgrade_advisor import UpgradeCategory
 
 
 class SkillAdviceRequest(BaseModel):
@@ -35,3 +37,82 @@ class SkillScoreBreakdown(BaseModel):
 class SkillAdviceResponse(BaseModel):
     recommended_skill_id: int
     ranking: list[SkillScoreBreakdown]
+
+
+class GearAdviceRequest(BaseModel):
+    account_id: int
+    category: GearCategory
+    #: Required (and only meaningful) when `category` is "armor" — armor
+    #: pieces only compete against others in the *same* slot, mirroring
+    #: how `equipment_service.equip_armor` itself scopes replacement.
+    armor_slot: ArmorSlot | None = None
+    objective: str = "balanced"
+
+    @model_validator(mode="after")
+    def _armor_requires_slot(self) -> GearAdviceRequest:
+        if self.category is GearCategory.ARMOR and self.armor_slot is None:
+            raise ValueError("armor_slot is required when category is 'armor'")
+        return self
+
+
+class GearScoreBreakdown(BaseModel):
+    category: GearCategory
+    catalog_id: int
+    name: str
+    is_currently_equipped: bool
+    score: float
+    summary: str
+    reasons: list[str]
+
+
+class GearAdviceResponse(BaseModel):
+    recommended_catalog_id: int
+    ranking: list[GearScoreBreakdown]
+
+
+class UpgradeAdviceRequest(BaseModel):
+    account_id: int
+    objective: str = "balanced"
+
+
+class UpgradeScoreBreakdown(BaseModel):
+    category: UpgradeCategory
+    catalog_id: int
+    name: str
+    from_level: int
+    to_level: int
+    gold_cost: float
+    #: Expected percentage improvement to the build's objective score —
+    #: the number itself, not just a description of it, since "how much
+    #: better" is the whole point of an upgrade recommendation.
+    score: float
+    summary: str
+    reasons: list[str]
+
+
+class UpgradeAdviceResponse(BaseModel):
+    recommended_catalog_id: int
+    ranking: list[UpgradeScoreBreakdown]
+
+
+class ChapterAdviceRequest(BaseModel):
+    account_id: int
+    #: "farm" ranks chapters by repeatable farming suitability
+    #: (safety + energy efficiency); any other objective ranks by
+    #: progression suitability (the furthest chapter still safely
+    #: reachable) — see `app.optimizer.advisors.chapter_advisor`.
+    objective: str = "balanced"
+
+
+class ChapterScoreBreakdown(BaseModel):
+    chapter_id: int
+    number: int
+    name: str
+    score: float
+    summary: str
+    reasons: list[str]
+
+
+class ChapterAdviceResponse(BaseModel):
+    recommended_chapter_id: int
+    ranking: list[ChapterScoreBreakdown]

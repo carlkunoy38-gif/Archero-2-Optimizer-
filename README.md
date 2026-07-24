@@ -44,7 +44,19 @@ This repository is being built module by module. Completed so far:
       no mock data. **Dashboard**, **Upgrade Advisor**, and **Settings** are honest
       placeholders until their backend advisors/endpoints exist. See
       `frontend/README.md` and "Frontend architecture" in `docs/architecture.md`.
-- [ ] **Module 5** — Real game data seeding (see "Game data" below).
+- [x] **Module 5 — Remaining Advisors**: Gear, Upgrade, and Chapter Advisors, built on
+      the same Optimizer Engine as Skill Advisor — no new decision engine, no static
+      tier lists. **Gear Advisor** (`POST /optimizer/gear/advise`) ranks an account's
+      owned weapons/armor/rings/amulets/pets and recommends what to equip. **Upgrade
+      Advisor** (`POST /optimizer/upgrade/advise`) finds the single best investment of
+      an account's current gold across every ownable item, never recommending an
+      upgrade that wouldn't actually improve the build. **Chapter Advisor** (`POST
+      /optimizer/chapters/advise`) recommends the best chapter to farm or the best to
+      push into next, and — when the account is under-powered for it — the best
+      upgrade to make first, by reusing the Upgrade Advisor directly. See "Module 5:
+      Gear, Upgrade, and Chapter Advisors" in `docs/architecture.md`.
+- [ ] **Module 6** — Real game data seeding (see "Game data" below), and frontend pages
+      for the three new advisors.
 
 ## Project layout
 
