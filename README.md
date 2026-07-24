@@ -13,9 +13,11 @@ it tells you what to do with it.
 This repository is being built module by module. Completed so far:
 
 - [x] **Module 1 — Foundation**: project scaffolding, environment configuration, logging,
-      SQLAlchemy domain models for all Phase 1 entities, Alembic migrations, unit tests.
-- [ ] **Module 2** — REST API (FastAPI routers, Pydantic schemas, `/heroes`, `/weapons`,
-      `/skills`, `/account` endpoints).
+      SQLAlchemy domain models for all Phase 1 entities, Alembic migrations, unit tests,
+      CI (lint, type-check, test, migration round trip on every push).
+- [x] **Module 2 — REST API**: FastAPI routers, Pydantic schemas, `GET /heroes`,
+      `GET /weapons`, `GET /skills`, `POST /account`, under a versioned prefix
+      (`/api/v1`), with OpenAPI docs at `/docs`.
 - [ ] **Module 3** — Optimizer scoring engine (DPS / Survival / Boss / Farming / Overall
       scores) and the `/optimizer/build` and `/optimizer/upgrade` endpoints.
 - [ ] **Module 4** — React + TypeScript + Tailwind frontend (Dashboard, My Account,

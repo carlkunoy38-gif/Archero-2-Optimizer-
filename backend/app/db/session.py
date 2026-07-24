@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
 
@@ -47,6 +48,7 @@ def build_engine(database_url: str, *, echo: bool = False) -> Engine:
     """
 
     connect_args: dict[str, object] = {}
+    engine_kwargs: dict[str, object] = {}
 
     if database_url.startswith("sqlite"):
         # FastAPI's request handling can hop threads; each request still
@@ -54,13 +56,28 @@ def build_engine(database_url: str, *, echo: bool = False) -> Engine:
         # across threads is safe.
         connect_args["check_same_thread"] = False
 
-        # Ensure the parent directory for a file-based SQLite DB exists
-        # (e.g. sqlite:////abs/path/database/archero2.db -> .../database/).
         db_path = database_url.removeprefix("sqlite:///")
-        if db_path and db_path != ":memory:":
+        is_memory_db = db_path in ("", ":memory:")
+
+        if is_memory_db:
+            # SQLAlchemy's default pool for SQLite hands each thread its
+            # own connection — fine for a file on disk, but for
+            # ":memory:" each connection *is a separate, empty database*.
+            # FastAPI runs sync route handlers in a worker thread, so
+            # without StaticPool (one connection, shared and reused by
+            # every checkout) a test client's request would see a
+            # different, table-less database than the one the test set
+            # up. Irrelevant for PostgreSQL or a file-based SQLite DB.
+            engine_kwargs["poolclass"] = StaticPool
+        else:
+            # Ensure the parent directory for a file-based SQLite DB
+            # exists (e.g. sqlite:////abs/path/database/archero2.db ->
+            # .../database/).
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    engine = create_engine(database_url, connect_args=connect_args, echo=echo, future=True)
+    engine = create_engine(
+        database_url, connect_args=connect_args, echo=echo, future=True, **engine_kwargs
+    )
 
     if database_url.startswith("sqlite"):
         enable_sqlite_foreign_keys(engine)

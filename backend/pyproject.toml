@@ -45,6 +45,13 @@ extend-exclude = ["alembic/versions"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.flake8-bugbear]
+# B008 ("no function calls in argument defaults") is a real footgun for
+# actual mutable-default bugs, but FastAPI's dependency injection
+# *requires* `Depends(...)`/`Query(...)` as a default value — that's the
+# documented, intended usage, not an accidental mutable default.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

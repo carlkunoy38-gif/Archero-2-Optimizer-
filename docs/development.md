@@ -21,6 +21,24 @@ implemented, tested, and reviewed before the next one starts. See the root READM
    `tests/backend/test_constraints.py`.
 7. Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
 
+## Adding an API endpoint
+
+1. Add/extend a Pydantic schema in `backend/app/schemas/` for the request and/or
+   response shape. Mirror any DB-level `CheckConstraint` with a matching Pydantic
+   `Field` constraint (e.g. `ge=0`) so bad input gets a 422 without a DB round trip.
+2. Add the data-access function to the matching `backend/app/repositories/` module.
+   Anything that's a real persistence invariant (uniqueness, a required reference)
+   belongs here as a typed exception from `app/repositories/errors.py` — repositories
+   never raise `HTTPException` or import anything from `fastapi`.
+3. Add the router in `backend/app/api/v1/`, and register it in
+   `backend/app/api/v1/router.py`. Catch each repository exception you expect and map
+   it to a status code; let anything else propagate (FastAPI turns it into a 500)
+   rather than mislabeling an unexpected failure.
+4. Add tests in `tests/backend/test_api_<resource>.py` using the `client` fixture
+   (`tests/backend/conftest.py`) — cover the success path, validation failures (422),
+   and every repository-error -> status-code mapping the router added.
+5. Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
+
 ## Conventions
 
 - **No bare strings for enumerable values.** If a field has a fixed set of valid
@@ -49,6 +67,13 @@ implemented, tested, and reviewed before the next one starts. See the root READM
 - **Game data placeholders are explicit.** Any model or seed value that stands in for
   real Archero 2 data says so in a docstring headed `GAME DATA PLACEHOLDER`, so it's
   easy to grep for what needs replacing once real data is sourced.
+- **Repositories are data access, not business logic.** A repository function may
+  enforce a genuine persistence invariant (a required reference exists, a value is
+  unique) but shouldn't grow multi-entity decision logic — that's what `services/` is
+  for (reserved for the Module 3 optimizer engine). See "API layer" in
+  `docs/architecture.md` for the reasoning.
+- **New endpoints are versioned.** Every route except `GET /health` is mounted under
+  `Settings.api_v1_prefix` (`app/main.py`) — don't add a bare top-level path.
 
 ## Testing philosophy
 

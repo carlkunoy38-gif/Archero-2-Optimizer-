@@ -49,6 +49,19 @@ ruff check .
 mypy app
 ```
 
+### Run the API server
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Interactive OpenAPI docs are then available at `http://localhost:8000/docs` (and the
+raw schema at `/openapi.json`). Every endpoint is mounted under `/api/v1` except
+`GET /health`, e.g. `http://localhost:8000/api/v1/heroes` — see
+`docs/architecture.md` ("API layer") for why. Note that `GET /heroes`, `/weapons`, and
+`/skills` will return an empty list until you seed catalog data (see `database/seeds/`)
+or insert rows some other way — the schema doesn't ship with sample rows.
+
 ## Switching to PostgreSQL
 
 Install the optional `postgres` extra (adds the `psycopg` driver):
