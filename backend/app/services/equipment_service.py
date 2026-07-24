@@ -15,10 +15,26 @@ steps commit together in `ownership_repo.save_ownership`'s single
 
 Clients never need a separate "unequip the old one" call: that's the
 whole point of these actions over the plain ownership update endpoints.
+
+Every `equip_*`/`activate_*` function additionally wraps that commit in
+`try/except IntegrityError`, matching `ownership_service.py`'s
+create-functions pattern. This isn't defense against anything the
+clear-then-set ordering gets wrong in a single request — it's the
+backstop for two *concurrent* requests each clearing-then-setting a
+different item for the same account: both can pass their own clear
+step before either commits, and Module 1's partial unique index (not
+this code) is what actually stops the resulting double-equip from ever
+being persisted — one of the two commits fails. Without this
+try/except, that failure surfaced as an unhandled 500; a concurrent
+uniqueness violation is exactly the kind of thing a client should see
+as a clean 409 and be able to retry. `unequip_*`/`deactivate_*` don't
+need this: clearing a flag to False/None can never violate a partial
+unique index that only constrains `True`/non-NULL rows.
 """
 
 from __future__ import annotations
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, NotFoundError
@@ -33,6 +49,7 @@ from app.domain.models import (
     UserWeaponOwnership,
 )
 from app.repositories import ownership as ownership_repo
+from app.services.errors import raise_conflict_from_integrity_error
 
 # --- Hero ---------------------------------------------------------------
 
@@ -41,9 +58,17 @@ def activate_hero(db: Session, account_id: int, hero_id: int) -> UserHeroOwnersh
     instance = ownership_repo.get_hero_ownership(db, account_id, hero_id)
     if instance is None:
         raise NotFoundError(f"Account {account_id} does not own hero {hero_id}")
-    ownership_repo.clear_other_equipped(db, UserHeroOwnership, "is_active", account_id, instance.id)
+    ownership_repo.clear_other_equipped(
+        db, UserHeroOwnership, "is_active", account_id, instance.id
+    )
     instance.is_active = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Hero {hero_id} could not be activated due to a conflicting update"
+        )
 
 
 def deactivate_hero(db: Session, account_id: int, hero_id: int) -> UserHeroOwnership:
@@ -63,7 +88,13 @@ def activate_pet(db: Session, account_id: int, pet_id: int) -> UserPetOwnership:
         raise NotFoundError(f"Account {account_id} does not own pet {pet_id}")
     ownership_repo.clear_other_equipped(db, UserPetOwnership, "is_active", account_id, instance.id)
     instance.is_active = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Pet {pet_id} could not be activated due to a conflicting update"
+        )
 
 
 def deactivate_pet(db: Session, account_id: int, pet_id: int) -> UserPetOwnership:
@@ -85,7 +116,13 @@ def equip_weapon(db: Session, account_id: int, weapon_id: int) -> UserWeaponOwne
         db, UserWeaponOwnership, "is_equipped", account_id, instance.id
     )
     instance.is_equipped = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Weapon {weapon_id} could not be equipped due to a conflicting update"
+        )
 
 
 def unequip_weapon(db: Session, account_id: int, weapon_id: int) -> UserWeaponOwnership:
@@ -114,7 +151,13 @@ def equip_armor(db: Session, account_id: int, armor_id: int) -> UserArmorOwnersh
         UserArmorOwnership.slot == instance.slot,
     )
     instance.is_equipped = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Armor {armor_id} could not be equipped due to a conflicting update"
+        )
 
 
 def unequip_armor(db: Session, account_id: int, armor_id: int) -> UserArmorOwnership:
@@ -136,7 +179,13 @@ def equip_ring(db: Session, account_id: int, ring_id: int) -> UserRingOwnership:
         db, UserRingOwnership, "is_equipped", account_id, instance.id
     )
     instance.is_equipped = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Ring {ring_id} could not be equipped due to a conflicting update"
+        )
 
 
 def unequip_ring(db: Session, account_id: int, ring_id: int) -> UserRingOwnership:
@@ -158,7 +207,13 @@ def equip_amulet(db: Session, account_id: int, amulet_id: int) -> UserAmuletOwne
         db, UserAmuletOwnership, "is_equipped", account_id, instance.id
     )
     instance.is_equipped = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Amulet {amulet_id} could not be equipped due to a conflicting update"
+        )
 
 
 def unequip_amulet(db: Session, account_id: int, amulet_id: int) -> UserAmuletOwnership:
@@ -185,7 +240,14 @@ def equip_rune(
     ownership_repo.clear_rune_socket(db, account_id, socket_index, instance.id)
     instance.socket_index = socket_index
     instance.is_equipped = True
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Rune {rune_id} could not be equipped into socket {socket_index}"
+            " due to a conflicting update"
+        )
 
 
 def unequip_rune(db: Session, account_id: int, rune_id: int) -> UserRuneOwnership:
@@ -210,7 +272,14 @@ def equip_skill(
         raise ConflictError(f"Skill {skill_id} is not unlocked and cannot be equipped")
     ownership_repo.clear_skill_slot(db, account_id, equipped_slot, instance.id)
     instance.equipped_slot = equipped_slot
-    return ownership_repo.save_ownership(db, instance)
+    try:
+        return ownership_repo.save_ownership(db, instance)
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_from_integrity_error(
+            exc, f"Skill {skill_id} could not be equipped into slot {equipped_slot}"
+            " due to a conflicting update"
+        )
 
 
 def unequip_skill(db: Session, account_id: int, skill_id: int) -> UserSkillSelection:

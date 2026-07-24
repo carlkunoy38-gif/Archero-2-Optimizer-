@@ -17,8 +17,6 @@ was equipped before" rule.
 
 from __future__ import annotations
 
-from typing import NoReturn
-
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -55,20 +53,7 @@ from app.schemas.ownership import (
     WeaponOwnershipUpdate,
 )
 from app.services import account_service, catalog_service
-
-
-def _conflict_if_duplicate(exc: IntegrityError, message: str) -> NoReturn:
-    """Always raises: `ConflictError` if `exc` looks like the unique
-    constraint we expect, otherwise `exc` itself, unmodified — so a
-    genuinely unexpected integrity failure surfaces as a 500 (via the
-    generic exception handler) rather than being mislabeled as a
-    duplicate-ownership conflict."""
-
-    orig_message = str(exc.orig)
-    if "UNIQUE constraint failed" in orig_message or "unique constraint" in orig_message.lower():
-        raise ConflictError(message) from exc
-    raise exc
-
+from app.services.errors import raise_conflict_from_integrity_error
 
 # --- Hero ---------------------------------------------------------------
 
@@ -88,7 +73,9 @@ def create_hero_ownership(
         return ownership_repo.create_hero_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(exc, f"Hero {payload.hero_id} is already owned by this account")
+        raise_conflict_from_integrity_error(
+            exc, f"Hero {payload.hero_id} is already owned by this account"
+        )
 
 
 def update_hero_ownership(
@@ -130,7 +117,7 @@ def create_weapon_ownership(
         return ownership_repo.create_weapon_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(
+        raise_conflict_from_integrity_error(
             exc, f"Weapon {payload.weapon_id} is already owned by this account"
         )
 
@@ -175,7 +162,9 @@ def create_armor_ownership(
         return ownership_repo.create_armor_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(exc, f"Armor {payload.armor_id} is already owned by this account")
+        raise_conflict_from_integrity_error(
+            exc, f"Armor {payload.armor_id} is already owned by this account"
+        )
 
 
 def update_armor_ownership(
@@ -214,7 +203,9 @@ def create_ring_ownership(
         return ownership_repo.create_ring_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(exc, f"Ring {payload.ring_id} is already owned by this account")
+        raise_conflict_from_integrity_error(
+            exc, f"Ring {payload.ring_id} is already owned by this account"
+        )
 
 
 def update_ring_ownership(
@@ -253,7 +244,7 @@ def create_amulet_ownership(
         return ownership_repo.create_amulet_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(
+        raise_conflict_from_integrity_error(
             exc, f"Amulet {payload.amulet_id} is already owned by this account"
         )
 
@@ -292,7 +283,9 @@ def create_pet_ownership(
         return ownership_repo.create_pet_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(exc, f"Pet {payload.pet_id} is already owned by this account")
+        raise_conflict_from_integrity_error(
+            exc, f"Pet {payload.pet_id} is already owned by this account"
+        )
 
 
 def update_pet_ownership(
@@ -331,7 +324,9 @@ def create_rune_ownership(
         return ownership_repo.create_rune_ownership(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(exc, f"Rune {payload.rune_id} is already owned by this account")
+        raise_conflict_from_integrity_error(
+            exc, f"Rune {payload.rune_id} is already owned by this account"
+        )
 
 
 def update_rune_ownership(
@@ -370,7 +365,7 @@ def create_skill_selection(
         return ownership_repo.create_skill_selection(db, instance)
     except IntegrityError as exc:
         db.rollback()
-        _conflict_if_duplicate(
+        raise_conflict_from_integrity_error(
             exc, f"Skill {payload.skill_id} is already selected by this account"
         )
 

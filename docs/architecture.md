@@ -317,6 +317,34 @@ Equipping a skill additionally requires `is_unlocked` to already be true —
 cleared, so a locked-skill equip attempt never disturbs whatever was already equipped
 in that slot (`tests/backend/test_api_equipment.py::test_equip_skill_failure_does_not_disturb_existing_equipped_skill`).
 
+### The concurrent-race backstop: catching IntegrityError on equip/activate
+
+Clear-then-set is correct *within one request*, but it does not by itself rule out two
+concurrent requests each clearing-then-setting a *different* item for the same
+account: both can pass their own clear step before either commits, so both attempt to
+set `is_equipped`/`is_active` true (or claim the same rune socket / skill slot) at
+once. Module 1's partial unique indexes are the actual backstop here, not application
+logic — one of the two commits will fail with `IntegrityError`, so the corrupted
+"both equipped" state can never be persisted. The gap this review round found and
+fixed was what happened *next*: every `equip_*`/`activate_*` function in
+`equipment_service.py` now wraps its `save_ownership` call in `try/except
+IntegrityError`, translating it to `ConflictError` (409) via the shared
+`app/services/errors.py::raise_conflict_from_integrity_error` — the same helper
+`ownership_service.py`'s `create_*` functions use for duplicate-ownership conflicts.
+Before this, that failure reached the generic `Exception` handler and returned an
+unhelpful 500; a concurrent uniqueness violation is exactly the kind of thing a client
+should see as a clean, retryable 409. `unequip_*`/`deactivate_*` don't need the same
+wrapping — clearing a flag to `False`/`NULL` can never violate a partial unique index
+that only constrains `True`/non-`NULL` rows.
+
+`tests/backend/test_equipment_conflict_race.py` verifies this for all eight
+equip/activate actions by monkeypatching the relevant `clear_*` repository call to a
+no-op (standing in for "a concurrent request's clear already ran"), pre-arming a
+conflicting row, and asserting a 409 rather than a 500. True thread-level concurrency
+remains untested — a known, deliberate scope boundary rather than an oversight, and one
+worth revisiting if this API ever needs to prove behavior under real concurrent load
+rather than just its effect.
+
 ### Testing FastAPI against the in-memory SQLite fixture
 
 `tests/backend/conftest.py`'s `client` fixture overrides the `get_db` dependency to
