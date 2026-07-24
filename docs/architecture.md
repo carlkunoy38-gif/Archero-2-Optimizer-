@@ -105,7 +105,11 @@ Two things worth calling out:
   table than the uniqueness needs to be checked on. Rather than a trigger,
   `UserArmorOwnership.slot` denormalizes a copy of `armor.slot`, kept in sync by a
   `@validates("armor")` hook that fires the moment `.armor` is assigned (in Python,
-  not deferred until flush) — see `app/domain/models/user_account.py`.
+  not deferred until flush) — see `app/domain/models/user_account.py`. The
+  `@validates` hook only fires on Python attribute assignment, not on a row written by
+  raw SQL or a future bulk-import script — **Module 2's API/service layer must always
+  derive `slot` from the `Armor` row itself and must never accept it as client input**,
+  so this denormalized copy can't be pushed out of sync through the API surface.
 - **Runes and skills don't need partial indexes** because a plain `UniqueConstraint`
   already does the right thing: SQL treats `NULL` as distinct from every other `NULL`
   in a unique constraint, so "not socketed" / "not equipped" rows (`NULL` index) never
