@@ -15,18 +15,21 @@ app/
                  enums) and Pydantic itself, never on repositories/services/api
   services/      business logic — depends on repositories, schemas, core.exceptions;
                  never on FastAPI or the api/ layer
+  optimizer/     decision/recommendation engine (Module 3) — depends only on domain
+                 (see "The Optimizer Engine (Module 3)" below for why this is its own
+                 top-level package rather than living under services/)
   api/           FastAPI routers (api/router.py + api/routes/*.py,
                  api/error_handlers.py) — depends on services + schemas
 ```
 
-`domain/` never imports from `repositories/`, `services/`, or `api/`. This means the
-scoring engine (Module 3) and the database models can be unit-tested and reused (e.g.
-from a CLI script) without booting FastAPI, and the API layer is a thin translation
-from HTTP into a service call and back rather than the place business rules live.
-`services/` holds every business rule Module 2 needs (account validation, ownership
-uniqueness, the equip/activate replacement logic) as well as being where Module 3's
-scoring engine will live — both depend only on `domain`/`repositories`, never on
-FastAPI, so either can be called from a script or tested in isolation.
+`domain/` never imports from `repositories/`, `services/`, `optimizer/`, or `api/`.
+This means the optimizer engine and the database models can be unit-tested and reused
+(e.g. from a CLI script) without booting FastAPI, and the API layer is a thin
+translation from HTTP into a service/optimizer call and back rather than the place
+business rules live. `services/` holds every business rule Module 2 needs (account
+validation, ownership uniqueness, the equip/activate replacement logic) — it depends
+only on `domain`/`repositories`, never on FastAPI, so it can be called from a script or
+tested in isolation.
 
 ## Catalog vs. account data
 
@@ -214,8 +217,7 @@ sense right now" gets decided — does the account exist, is the display name ta
 equipping this weapon need to unequip another one first; a repository function is pure
 data access with no decisions in it at all. Nothing downstream ever imports upstream:
 `repositories/` has no idea FastAPI exists, and `services/` has no idea whether it's
-being called from a route, a test, or (for the Module 3 scoring engine, which will live
-in this same `services/` package) a batch script.
+being called from a route, a test, or a batch script.
 
 Two boundaries worth being explicit about, because it would be easy to blur them under
 time pressure:
@@ -361,9 +363,120 @@ in-memory SQLite URLs specifically — one connection, shared and reused everywh
 which is the standard fix for exercising an in-memory SQLite database from a
 multi-threaded app. File-based SQLite and PostgreSQL are unaffected.
 
+## The Optimizer Engine (Module 3)
+
+### What it is, and what it deliberately is not
+
+Archero 2 Optimizer never automates gameplay, controls the game, sends input, reads
+the game's memory, or modifies the game in any way — the player always plays manually.
+The Optimizer Engine's only job is to look at data the player's account already has
+(hero, gear, runes, skills, chapter progress) and turn it into a recommendation: which
+of several options is best *for this build*, and why. Module 3 ships the first
+concrete advisor built on this engine — the Skill Advisor, `POST
+/optimizer/skills/advise` — but the engine itself is designed to carry a Gear Advisor,
+Farm Advisor, Upgrade Advisor, Rune Advisor, and Resource Advisor later without being
+rewritten.
+
+### Why `app/optimizer/` is its own top-level package, not a module under `services/`
+
+Earlier notes in this file (and the original Module 2 write-up) assumed the scoring
+engine would live inside `services/`. Building it surfaced a real reason not to:
+`services/` functions are characterized by needing a `Session` and raising
+`NotFoundError`/`ConflictError` — they are inherently request-shaped. The optimizer's
+actual decision logic (given a build's stats, which of these candidates scores
+highest, and why) has no reason to need a database at all — it is a pure function of
+numbers. Keeping that logic under `services/` would mean every future consumer the
+spec explicitly calls out — a mobile app, an overlay, a screenshot-analysis pipeline —
+would either have to go through a `Session`-shaped API it doesn't need, or the "pure"
+and "DB-aware" pieces would end up tangled in the same module out of proximity. A
+sibling top-level package makes the boundary a directory, not a convention someone has
+to remember: `context.py`, `engine.py`, `weights.py`, and `results.py` import nothing
+but `app.domain` (models and enums) — no `Session`, no FastAPI — and only the
+`advise_for_account`-style wrapper at the bottom of each advisor module touches a
+database, by calling into the *existing* `services/` (`account_service`,
+`catalog_service`) rather than repositories directly, so account-lookup rules
+(`NotFoundError` on a missing account/skill) stay defined in exactly one place.
+
+### Layering inside `app/optimizer/`
+
+```
+app/optimizer/
+  weights.py           every tunable constant, GAME DATA PLACEHOLDER — see below
+  context.py           BuildContext (a snapshot of one account's aggregated stats)
+                        + build_context(account) to construct one from ORM data
+  engine.py             the shared scoring primitives every advisor is built from:
+                        offense_score, defense_score, mobility_score, utility_score
+  results.py            ScoredOption[T] / AdvisorResult[T] — the generic "ranked
+                        options with reasons" shape every advisor reports in
+  advisors/
+    skill_advisor.py    the first concrete advisor: score_skill, advise, and the
+                        DB-aware advise_for_account wrapper
+```
+
+**`BuildContext`** is the one thing every advisor scores candidates against: an
+immutable snapshot of an account's aggregated attack/defense/hp/speed/crit/dodge/
+resource-gain, built once by `build_context()` from the active hero, equipped weapon,
+equipped armor pieces, equipped rings/amulets, active pet, and equipped runes (each
+scaled by its own level/star factor), plus the account's current chapter (for
+`power_gap_ratio`, i.e. how over/under-powered the account is for where it currently
+is). It requires no database of its own — it's built once from an already
+eager-loaded `UserAccount` (see `app/repositories/account_repository.get_account_with_detail`,
+extended in this module to eager-load every ownership type's catalog relationship so
+`build_context` never triggers a lazy-load) and is plain data from then on.
+
+**`engine.py`**'s four scoring primitives (`offense_score`, `defense_score`,
+`mobility_score`, `utility_score`) are the actual "decision engine" every advisor is
+built from — each reduces a `BuildContext` to one number summarizing a dimension of
+the build. The Skill Advisor combines them by candidate skill type; a future Gear
+Advisor would compare these same primitives across a *hypothetical* `BuildContext` per
+candidate item; a Farm Advisor would weigh `utility_score` against a chapter's energy
+cost. If a new advisor needs a dimension not covered here, the primitive belongs in
+`engine.py`, not duplicated inside that advisor's own module — that is what "all
+advisors reuse the same decision engine" means concretely.
+
+**`results.py`** is deliberately *just* a data shape (`ScoredOption[T]`:
+option/score/reasons; `AdvisorResult[T]`: a ranked tuple plus a `.recommended`
+property), not a forced common interface. A skill choice, a future gear choice, and a
+future farming-route choice don't share an input shape or a lookup path, so a common
+`Advisor` abstract base class behind one real implementation would be premature
+abstraction over a single concrete case. What's actually shared across advisors is the
+`engine.py` primitives and this reporting shape — every advisor returns "ranked
+options, best first, each with human-readable reasons" — not a forced
+`Advisor.recommend()` method signature.
+
+**`weights.py`** centralizes every tunable number the scoring formulas use (how much a
+level or star adds, how much an offensive/defensive/utility/movement skill's synergy
+bonus is worth, the "expected" defense baseline a defensive pick is compared against).
+Like the catalog enums in `app/domain/models/enums.py`, these are explicitly marked
+**GAME DATA PLACEHOLDER** — realistic-shaped numbers chosen so the engine is fully
+functional today, not measurements from the real game. Centralizing them in one module
+means re-tuning the whole engine against real game data later is a one-file change,
+not a hunt through every advisor for a hardcoded constant.
+
+### Why the Skill Advisor never uses a static tier list
+
+`score_skill` never branches on a skill's *name*. It scores any `Skill` catalog row
+using only its `skill_type` (offensive/defensive/utility/movement) and `tier`,
+combined with the account's `BuildContext`: an offensive skill is worth more the
+harder the build already hits (it compounds with existing offense); a defensive skill
+is worth more the more deficient the build's current survivability is relative to a
+baseline (diminishing returns — the first points of survivability matter more than the
+hundredth); a utility skill scales with the build's resource gain; a movement skill is
+worth more the more under-powered the account is for its current chapter
+(`power_gap_ratio`). This is why the same three candidate skills, offered to two
+accounts with different real builds, can and do produce a different *recommended*
+skill — proven end-to-end in
+`tests/backend/test_optimizer_skill_advisor.py::test_same_candidates_rank_differently_for_different_builds`
+and `test_advise_for_account_reflects_real_db_backed_builds`. Adding a new skill to the
+catalog needs zero code changes to the advisor — it works purely from
+`skill_type`/`tier`, whatever row is thrown at it.
+
 ## What's not decided yet
 
-Module 3 (the optimizer scoring engine, `/optimizer/build`, `/optimizer/upgrade`) and
-Module 4 (the frontend) will introduce their own design notes in this file as they
-land. The scoring engine's weighting model in particular is meant to be revisited once
-real game data is available — see the root README's "Game data" section.
+Module 4 (the frontend) will introduce its own design notes in this file as it lands.
+The Gear Advisor, Farm Advisor, Upgrade Advisor, Rune Advisor, and Resource Advisor
+called for in the Module 3 spec are not built yet — each would add one module under
+`app/optimizer/advisors/`, reusing `engine.py`'s primitives, without changing
+`context.py`, `engine.py`, or `results.py`. The weighting model in `weights.py` in
+particular is meant to be revisited once real game data is available — see the root
+README's "Game data" section.

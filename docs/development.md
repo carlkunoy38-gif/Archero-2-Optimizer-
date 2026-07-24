@@ -56,6 +56,40 @@ Then: add tests in `tests/backend/test_api_<resource>.py` using the `client` fix
 `NotFoundError`/`ConflictError` the service can raise, mapped to the right status code.
 Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
 
+## Adding an advisor
+
+See "The Optimizer Engine (Module 3)" in `docs/architecture.md` for why
+`app/optimizer/` is a separate top-level package from `services/`, and read
+`app/optimizer/advisors/skill_advisor.py` as the reference implementation before
+starting a new one.
+
+1. **Pure `advise(context, candidates)`** in a new `app/optimizer/advisors/<name>.py`:
+   takes a `BuildContext` and a `Sequence` of whatever catalog type this advisor
+   compares, returns `AdvisorResult[T]` (`app/optimizer/results.py`). No `Session`, no
+   FastAPI import — this is what makes the advisor usable outside a web request later
+   (mobile app, overlay, screenshot pipeline). If comparing candidates needs a
+   dimension `app/optimizer/engine.py`'s primitives don't cover yet (offense/defense/
+   mobility/utility score), add the primitive there — don't compute it ad hoc inside
+   the advisor.
+2. **Every number the advisor's formula needs** goes in `app/optimizer/weights.py`, not
+   inline in the advisor module — and gets the same `GAME DATA PLACEHOLDER` treatment
+   as the rest of the catalog if it's not a real, sourced game value yet.
+3. **DB-aware `advise_for_account(db, account_id, ...)`** wrapper at the bottom of the
+   same module: load the account via the existing `account_service` (never a
+   repository directly, so `NotFoundError` behavior stays centralized), call
+   `build_context()`, resolve whatever candidate IDs the caller passed via the
+   existing `catalog_service` getters (same reason), then delegate to `advise`.
+4. **Schema + route**, same shape as any other endpoint: a request/response pair in
+   `app/schemas/optimizer.py`, a route in `app/api/routes/optimizer.py` (or a new file
+   if the advisor doesn't fit that module), registered in `app/api/router.py`.
+5. **Tests**: pure unit tests against hand-built `BuildContext` instances for the
+   scoring formula itself (fast, exact expected numbers — see
+   `tests/backend/test_optimizer_skill_advisor.py`), plus at least one test that
+   proves the advisor's recommendation is genuinely build-dependent — the same
+   candidates must produce a *different* top recommendation for two differently-built
+   accounts, not just different scores. That property, not raw code coverage, is what
+   actually proves "no static tier list."
+
 ## Conventions
 
 - **No bare strings for enumerable values.** If a field has a fixed set of valid
@@ -86,9 +120,8 @@ Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
   easy to grep for what needs replacing once real data is sourced.
 - **Repositories are data access, not business logic.** A repository function never
   decides anything — no "if missing, raise," no uniqueness pre-checks, no HTTP-shaped
-  exceptions. That's what `services/` is for, and it's also where the Module 3
-  optimizer engine will live. See "API layer" in `docs/architecture.md` for the
-  reasoning.
+  exceptions. That's what `services/` is for. See "API layer" in `docs/architecture.md`
+  for the reasoning.
 - **New endpoints are versioned.** Every route except `GET /health` is mounted under
   `Settings.api_v1_prefix` (`app/main.py`) — don't add a bare top-level path.
 - **Errors are domain exceptions, not `HTTPException`.** Services raise

@@ -14,6 +14,7 @@ from app.api.routes import (
     chapters,
     equipment,
     heroes,
+    optimizer,
     ownership,
     pets,
     rings,
@@ -39,3 +40,6 @@ api_router.include_router(chapters.router)
 api_router.include_router(accounts.router)
 api_router.include_router(ownership.router)
 api_router.include_router(equipment.router)
+
+# Optimizer: decision-support advisors (never controls the game)
+api_router.include_router(optimizer.router)

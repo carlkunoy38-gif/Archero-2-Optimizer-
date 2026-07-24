@@ -77,6 +77,7 @@ potentially exposing internals. See "Consistent error envelope" in
 | `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}` | Account creation, full detail (with every owned item and chapter progress), and resource/current-chapter updates |
 | `POST/PATCH/DELETE /accounts/{id}/<heroes\|weapons\|armor\|rings\|amulets\|pets\|runes\|skills>` | Own, update the progression of, or drop an item; `PUT /accounts/{id}/chapters/{id}/progress` upserts chapter progress |
 | `POST /accounts/{id}/<...>/{item_id}/<activate\|deactivate\|equip\|unequip>` | Transactional equip/activate actions — see `docs/architecture.md` ("Equip actions") |
+| `POST /optimizer/skills/advise` | Skill Advisor (Module 3) — ranks candidate in-run skill choices against one account's actual current build; never a static tier list. See `docs/architecture.md` ("The Optimizer Engine") |
 
 Full request/response shapes are in Swagger UI at `/docs` — this table is a map, not a
 reference.

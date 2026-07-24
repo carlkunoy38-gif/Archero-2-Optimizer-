@@ -22,8 +22,13 @@ This repository is being built module by module. Completed so far:
       transactional equip/activate actions that auto-replace whatever was equipped
       before — all under a versioned prefix (`/api/v1`), with a consistent JSON error
       envelope and OpenAPI docs at `/docs`.
-- [ ] **Module 3** — Optimizer scoring engine (DPS / Survival / Boss / Farming / Overall
-      scores) and the `/optimizer/build` and `/optimizer/upgrade` endpoints.
+- [x] **Module 3 — Optimizer Engine**: a standalone, UI-independent decision engine
+      (`app/optimizer/`) that aggregates an account's hero/gear/runes/pet into a
+      `BuildContext` and scores candidate options against it — never a static tier
+      list. First advisor: the Skill Advisor (`POST /optimizer/skills/advise`), which
+      ranks candidate in-run skill choices and explains why, using only the account's
+      actual current build. Designed to carry future advisors (Gear, Farm, Upgrade,
+      Rune, Resource) on the same engine; see `docs/architecture.md`.
 - [ ] **Module 4** — React + TypeScript + Tailwind frontend (Dashboard, My Account,
       Build Optimizer, Upgrade Advisor, Settings).
 - [ ] **Module 5** — Real game data seeding (see "Game data" below).
