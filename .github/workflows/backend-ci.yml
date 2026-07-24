@@ -26,8 +26,11 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/pyproject.toml
 
-      - name: Install backend package (with dev extras)
-        run: pip install -e ".[dev]"
+      - name: Install backend package (with dev + postgres extras)
+        # postgres is otherwise optional (SQLite-only users never need
+        # psycopg installed) but the test suite exercises the PostgreSQL
+        # dialect branch in app/db/session.py, so CI needs the driver too.
+        run: pip install -e ".[dev,postgres]"
 
       - name: Lint (ruff)
         run: ruff check .

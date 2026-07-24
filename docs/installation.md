@@ -12,10 +12,17 @@ cd backend
 python3.12 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install --upgrade pip
-pip install -e ".[dev]"
+pip install -e ".[dev,postgres]"
 
 cp .env.example .env               # adjust ARCHERO_* values if needed
 ```
+
+The `postgres` extra (the `psycopg` driver) is only required to actually *connect* to
+PostgreSQL, but the test suite also exercises that dialect's code path
+(`tests/backend/test_settings.py`), so install it even if you plan to stick with the
+SQLite default — otherwise one test fails with `ModuleNotFoundError: psycopg` for
+reasons that have nothing to do with your change. CI installs both extras for the
+same reason.
 
 ### Initialize the database
 
