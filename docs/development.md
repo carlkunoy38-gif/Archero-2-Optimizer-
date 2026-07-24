@@ -23,21 +23,38 @@ implemented, tested, and reviewed before the next one starts. See the root READM
 
 ## Adding an API endpoint
 
-1. Add/extend a Pydantic schema in `backend/app/schemas/` for the request and/or
-   response shape. Mirror any DB-level `CheckConstraint` with a matching Pydantic
-   `Field` constraint (e.g. `ge=0`) so bad input gets a 422 without a DB round trip.
-2. Add the data-access function to the matching `backend/app/repositories/` module.
-   Anything that's a real persistence invariant (uniqueness, a required reference)
-   belongs here as a typed exception from `app/repositories/errors.py` — repositories
-   never raise `HTTPException` or import anything from `fastapi`.
-3. Add the router in `backend/app/api/v1/`, and register it in
-   `backend/app/api/v1/router.py`. Catch each repository exception you expect and map
-   it to a status code; let anything else propagate (FastAPI turns it into a 500)
-   rather than mislabeling an unexpected failure.
-4. Add tests in `tests/backend/test_api_<resource>.py` using the `client` fixture
-   (`tests/backend/conftest.py`) — cover the success path, validation failures (422),
-   and every repository-error -> status-code mapping the router added.
-5. Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
+Four layers, always in this order — see "API layer" in `docs/architecture.md` for the
+full reasoning:
+
+1. **Schema** (`backend/app/schemas/`): the request/response shape. Mirror any DB-level
+   `CheckConstraint` with a matching Pydantic `Field` constraint (e.g. `ge=0`) so bad
+   input gets a 422 without a DB round trip. If a field must never be client-settable
+   (armor's `slot`; any `is_equipped`/`is_active`/socket-or-slot-index field), leave it
+   off the `Create`/`Update` schema entirely — that's the actual enforcement, not a
+   comment saying not to accept it.
+2. **Repository** (`backend/app/repositories/`): pure data access — get, list, add,
+   delete. No decisions here: a "get" that finds nothing returns `None`, it does not
+   raise. If several equip actions need the same shape of "clear this flag on every
+   other row," that's a shared repository helper (see `ownership.py::clear_other_equipped`);
+   a decision like "does clearing apply account-wide or scoped to one slot" is the
+   caller's (the service's) job to specify via extra `WHERE` clauses, not the
+   repository's to decide.
+3. **Service** (`backend/app/services/`): every decision — does the referenced
+   account/catalog item exist (`NotFoundError` if not), is this a duplicate
+   (`ConflictError` if so), does an equip action need to replace something first. Raise
+   `app.core.exceptions.NotFoundError` / `ConflictError` — never `fastapi.HTTPException`
+   — so this layer stays callable from a script or the optimizer engine without a
+   FastAPI dependency.
+4. **Route** (`backend/app/api/routes/`, registered in `backend/app/api/router.py`):
+   call exactly one service function and set the success status code (201 create, 200
+   read/update, 204 delete). Don't catch exceptions here — `app/api/error_handlers.py`
+   already translates every `NotFoundError`/`ConflictError`/validation failure into the
+   standard error envelope; a route-level `try`/`except` would just be redundant.
+
+Then: add tests in `tests/backend/test_api_<resource>.py` using the `client` fixture
+(`tests/backend/conftest.py`) — success path, validation failures (422), and every
+`NotFoundError`/`ConflictError` the service can raise, mapped to the right status code.
+Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
 
 ## Conventions
 
@@ -67,13 +84,22 @@ implemented, tested, and reviewed before the next one starts. See the root READM
 - **Game data placeholders are explicit.** Any model or seed value that stands in for
   real Archero 2 data says so in a docstring headed `GAME DATA PLACEHOLDER`, so it's
   easy to grep for what needs replacing once real data is sourced.
-- **Repositories are data access, not business logic.** A repository function may
-  enforce a genuine persistence invariant (a required reference exists, a value is
-  unique) but shouldn't grow multi-entity decision logic — that's what `services/` is
-  for (reserved for the Module 3 optimizer engine). See "API layer" in
-  `docs/architecture.md` for the reasoning.
+- **Repositories are data access, not business logic.** A repository function never
+  decides anything — no "if missing, raise," no uniqueness pre-checks, no HTTP-shaped
+  exceptions. That's what `services/` is for, and it's also where the Module 3
+  optimizer engine will live. See "API layer" in `docs/architecture.md` for the
+  reasoning.
 - **New endpoints are versioned.** Every route except `GET /health` is mounted under
   `Settings.api_v1_prefix` (`app/main.py`) — don't add a bare top-level path.
+- **Errors are domain exceptions, not `HTTPException`.** Services raise
+  `app.core.exceptions.NotFoundError` / `ConflictError`; routes never construct an
+  error response by hand. If a genuinely new *kind* of error condition comes up that
+  doesn't fit either, add a new `AppError` subclass and a handler for it in
+  `app/api/error_handlers.py` rather than reaching for `HTTPException` in a route.
+- **`ARCHERO_DEBUG=false` in any real deployment.** Debug mode makes Starlette render
+  its own traceback page for an unhandled exception instead of the custom error
+  envelope — see "Consistent error envelope" in `docs/architecture.md`. This is not
+  optional for anything actually exposed to users.
 
 ## Testing philosophy
 

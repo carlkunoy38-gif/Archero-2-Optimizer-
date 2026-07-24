@@ -55,12 +55,31 @@ mypy app
 uvicorn app.main:app --reload
 ```
 
-Interactive OpenAPI docs are then available at `http://localhost:8000/docs` (and the
-raw schema at `/openapi.json`). Every endpoint is mounted under `/api/v1` except
-`GET /health`, e.g. `http://localhost:8000/api/v1/heroes` — see
-`docs/architecture.md` ("API layer") for why. Note that `GET /heroes`, `/weapons`, and
-`/skills` will return an empty list until you seed catalog data (see `database/seeds/`)
-or insert rows some other way — the schema doesn't ship with sample rows.
+Interactive OpenAPI docs (Swagger UI) are then available at `http://localhost:8000/docs`
+(ReDoc at `/redoc`, raw schema at `/openapi.json`). Every endpoint is mounted under
+`/api/v1` except `GET /health`, e.g. `http://localhost:8000/api/v1/heroes` — see
+`docs/architecture.md` ("API layer") for why. The nine catalog list endpoints will
+return an empty array until you seed catalog data (see `database/seeds/`) or insert
+rows some other way — the schema doesn't ship with sample rows.
+
+**`ARCHERO_DEBUG` defaults to `true`**, which is what you want locally (FastAPI/
+Starlette's own debug tooling). **Any deployment reachable by someone other than you
+must set `ARCHERO_DEBUG=false`** — with debug mode on, an unhandled exception returns
+Starlette's own HTML/text traceback instead of this project's error envelope,
+potentially exposing internals. See "Consistent error envelope" in
+`docs/architecture.md`.
+
+### Endpoint groups
+
+| Prefix | What it is |
+|---|---|
+| `GET /heroes`, `/weapons`, `/armor`, `/rings`, `/amulets`, `/pets`, `/runes`, `/skills`, `/chapters` (+ `/{id}`) | Read-only catalog data, paginated (`limit`/`offset`) and filterable (e.g. `?rarity=epic`) |
+| `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}` | Account creation, full detail (with every owned item and chapter progress), and resource/current-chapter updates |
+| `POST/PATCH/DELETE /accounts/{id}/<heroes\|weapons\|armor\|rings\|amulets\|pets\|runes\|skills>` | Own, update the progression of, or drop an item; `PUT /accounts/{id}/chapters/{id}/progress` upserts chapter progress |
+| `POST /accounts/{id}/<...>/{item_id}/<activate\|deactivate\|equip\|unequip>` | Transactional equip/activate actions — see `docs/architecture.md` ("Equip actions") |
+
+Full request/response shapes are in Swagger UI at `/docs` — this table is a map, not a
+reference.
 
 ## Switching to PostgreSQL
 

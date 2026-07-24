@@ -15,9 +15,13 @@ This repository is being built module by module. Completed so far:
 - [x] **Module 1 — Foundation**: project scaffolding, environment configuration, logging,
       SQLAlchemy domain models for all Phase 1 entities, Alembic migrations, unit tests,
       CI (lint, type-check, test, migration round trip on every push).
-- [x] **Module 2 — REST API**: FastAPI routers, Pydantic schemas, `GET /heroes`,
-      `GET /weapons`, `GET /skills`, `POST /account`, under a versioned prefix
-      (`/api/v1`), with OpenAPI docs at `/docs`.
+- [x] **Module 2 — REST API**: FastAPI routers/services/repositories, Pydantic schemas,
+      paginated + filterable read endpoints for all nine catalog resources (heroes,
+      weapons, armor, rings, amulets, pets, runes, skills, chapters), full account
+      management (create/read/update, per-item ownership CRUD, chapter progress), and
+      transactional equip/activate actions that auto-replace whatever was equipped
+      before — all under a versioned prefix (`/api/v1`), with a consistent JSON error
+      envelope and OpenAPI docs at `/docs`.
 - [ ] **Module 3** — Optimizer scoring engine (DPS / Survival / Boss / Farming / Overall
       scores) and the `/optimizer/build` and `/optimizer/upgrade` endpoints.
 - [ ] **Module 4** — React + TypeScript + Tailwind frontend (Dashboard, My Account,

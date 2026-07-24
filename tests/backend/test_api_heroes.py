@@ -1,4 +1,4 @@
-"""Tests for GET /api/v1/heroes."""
+"""Tests for GET /api/v1/heroes and GET /api/v1/heroes/{hero_id}."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 from app.domain.models import Hero, HeroClass, Rarity
 
 
-def _make_hero(name: str, hero_class: HeroClass = HeroClass.WARRIOR) -> Hero:
-    return Hero(name=name, hero_class=hero_class, rarity=Rarity.EPIC)
+def _make_hero(
+    name: str, hero_class: HeroClass = HeroClass.WARRIOR, rarity: Rarity = Rarity.EPIC
+) -> Hero:
+    return Hero(name=name, hero_class=hero_class, rarity=rarity)
 
 
 def test_list_heroes_empty(client: TestClient) -> None:
@@ -47,3 +49,47 @@ def test_list_heroes_rejects_invalid_limit(client: TestClient) -> None:
 
     response = client.get("/api/v1/heroes", params={"limit": 500})
     assert response.status_code == 422
+
+
+def test_list_heroes_filters_by_rarity(client: TestClient, db: Session) -> None:
+    db.add_all(
+        [
+            _make_hero("Common Hero", rarity=Rarity.COMMON),
+            _make_hero("Legendary Hero", rarity=Rarity.LEGENDARY),
+        ]
+    )
+    db.commit()
+
+    response = client.get("/api/v1/heroes", params={"rarity": "legendary"})
+    assert response.status_code == 200
+    names = {hero["name"] for hero in response.json()}
+    assert names == {"Legendary Hero"}
+
+
+def test_list_heroes_filters_by_hero_class(client: TestClient, db: Session) -> None:
+    db.add_all(
+        [
+            _make_hero("Warrior Hero", hero_class=HeroClass.WARRIOR),
+            _make_hero("Mage Hero", hero_class=HeroClass.MAGE),
+        ]
+    )
+    db.commit()
+
+    response = client.get("/api/v1/heroes", params={"hero_class": "mage"})
+    assert response.status_code == 200
+    names = {hero["name"] for hero in response.json()}
+    assert names == {"Mage Hero"}
+
+
+def test_get_hero_detail(client: TestClient, hero: Hero) -> None:
+    response = client.get(f"/api/v1/heroes/{hero.id}")
+    assert response.status_code == 200
+    assert response.json()["id"] == hero.id
+    assert response.json()["name"] == hero.name
+
+
+def test_get_hero_detail_missing_is_404(client: TestClient) -> None:
+    response = client.get("/api/v1/heroes/999999")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"]["type"] == "not_found"

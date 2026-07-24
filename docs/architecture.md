@@ -7,20 +7,26 @@ than by framework magic:
 
 ```
 app/
-  core/         settings, logging — no dependency on anything else in the app
-  db/           engine/session/declarative base — depends only on core
-  domain/       ORM models (the entities) — depends only on db
-  repositories/ data access functions over a Session (Module 2) — depends only on domain
-  schemas/      Pydantic request/response models (Module 2) — depends only on domain
-                (for enums) and Pydantic itself, never on repositories or api
-  api/          FastAPI routers (Module 2) — depends on schemas + repositories
-  services/     optimizer scoring engine (Module 3) — depends on domain, not on api
+  core/          settings, logging, exceptions — no dependency on anything else in the app
+  db/            engine/session/declarative base — depends only on core
+  domain/        ORM models (the entities) — depends only on db
+  repositories/  data access functions over a Session — depends only on domain
+  schemas/       Pydantic request/response models — depends only on domain (for
+                 enums) and Pydantic itself, never on repositories/services/api
+  services/      business logic — depends on repositories, schemas, core.exceptions;
+                 never on FastAPI or the api/ layer
+  api/           FastAPI routers (api/router.py + api/routes/*.py,
+                 api/error_handlers.py) — depends on services + schemas
 ```
 
-`domain/` never imports from `repositories/`, `api/`, or `services/`. This means the
-scoring engine and the database models can be unit-tested and reused (e.g. from a CLI
-script) without booting FastAPI, and the API layer is a thin adapter over the domain
-rather than the place where business rules live.
+`domain/` never imports from `repositories/`, `services/`, or `api/`. This means the
+scoring engine (Module 3) and the database models can be unit-tested and reused (e.g.
+from a CLI script) without booting FastAPI, and the API layer is a thin translation
+from HTTP into a service call and back rather than the place business rules live.
+`services/` holds every business rule Module 2 needs (account validation, ownership
+uniqueness, the equip/activate replacement logic) as well as being where Module 3's
+scoring engine will live — both depend only on `domain`/`repositories`, never on
+FastAPI, so either can be called from a script or tested in isolation.
 
 ## Catalog vs. account data
 
@@ -128,11 +134,14 @@ Two things worth calling out:
   `@validates("armor")` hook that fires the moment `.armor` is assigned (in Python,
   not deferred until flush) — see `app/domain/models/user_account.py`. The
   `@validates` hook only fires on Python attribute assignment, not on a row written by
-  raw SQL or a future bulk-import script — **the API/service layer must always derive
+  raw SQL or a future bulk-import script — **the service layer must always derive
   `slot` from the `Armor` row itself and must never accept it as client input**, so
-  this denormalized copy can't be pushed out of sync through the API surface. (Not yet
-  relevant to Module 2 — armor ownership isn't exposed by an endpoint yet — but it
-  applies the moment one is added.)
+  this denormalized copy can't be pushed out of sync through the API surface. This is
+  exactly what `ownership_service.create_armor_ownership` does (Module 2):
+  `ArmorOwnershipCreate` has no `slot` field at all, so there's nothing for a client to
+  override even by trying — the service fetches the `Armor` catalog row and constructs
+  `UserArmorOwnership(armor=armor, ...)`, letting the `@validates` hook derive `slot`
+  itself; see `tests/backend/test_api_ownership.py::test_create_armor_ownership_ignores_client_supplied_slot`.
 - **Runes and skills don't need partial indexes** because a plain `UniqueConstraint`
   already does the right thing: SQL treats `NULL` as distinct from every other `NULL`
   in a unique constraint, so "not socketed" / "not equipped" rows (`NULL` index) never
@@ -150,11 +159,12 @@ things in the same slot," not "no more than N things equipped."
 
 Numeric columns that should never go negative (`gold`, `gems`, `energy`, `combat_power`
 on `UserAccount`; `level`, `stars`, `star_level`, `attempts`, `stars_earned` on the
-ownership/progress tables) have a `CheckConstraint` at the database level. `POST
-/account`'s request schema (`app/schemas/account.py`) mirrors the same constraints with
-`Field(ge=0)`, so a bad request gets a 422 with a field-level message instead of a
-round trip to the database just to learn gold can't be negative — but the database
-constraint remains the actual guarantee, not the API layer's validation.
+ownership/progress tables) have a `CheckConstraint` at the database level. The matching
+request schemas (`app/schemas/account.py`, `app/schemas/ownership.py`) mirror the same
+constraints with `Field(ge=0)` / `Field(ge=1)`, so a bad request gets a 422 with a
+field-level message instead of a round trip to the database just to learn gold can't be
+negative — but the database constraint remains the actual guarantee, not the API
+layer's validation.
 
 ## Naming convention and multi-column unique constraints
 
@@ -195,32 +205,59 @@ debug mode.
 
 ## API layer (Module 2)
 
-### Repositories, not a service layer, for straightforward reads/writes
+### Four layers, one direction of dependency
 
-`api/` routers call `repositories/` functions directly rather than through an
-intermediate service layer. A repository (`hero_repository.list_heroes`,
-`account_repository.create_account`, ...) is the right place for logic that's
-*inherent to persisting the data correctly* — e.g. `create_account` checks that
-`current_chapter_id` refers to a real chapter before inserting, and translates the
-"duplicate display name" integrity violation into a typed exception — but it stays
-free of HTTP concerns (no `HTTPException`, no status codes). `services/` is reserved,
-per the layering diagram above, for the optimizer scoring engine in Module 3, which
-has actual multi-entity business logic (weighing DPS/survival/boss/farming scores)
-that doesn't belong in a data-access function. Introducing a service layer for
-`POST /account`'s two straightforward checks would be premature structure for what it
-does today; that call should be revisited if account creation grows real business
-rules.
+`api/routes/*.py` → `services/*.py` → `repositories/*.py` → `domain/models/*.py`. A
+route handler validates the request (Pydantic does that automatically) and calls
+exactly one service function; a service function is where "does this request make
+sense right now" gets decided — does the account exist, is the display name taken, does
+equipping this weapon need to unequip another one first; a repository function is pure
+data access with no decisions in it at all. Nothing downstream ever imports upstream:
+`repositories/` has no idea FastAPI exists, and `services/` has no idea whether it's
+being called from a route, a test, or (for the Module 3 scoring engine, which will live
+in this same `services/` package) a batch script.
 
-### Error translation happens at the router, not the repository
+Two boundaries worth being explicit about, because it would be easy to blur them under
+time pressure:
 
-Repository functions raise plain Python exceptions (`app/repositories/errors.py`:
-`DuplicateDisplayNameError`, `ChapterNotFoundError`) rather than `HTTPException` —
-this keeps them callable from a script or the optimizer engine without a FastAPI
-dependency. Each router catches the specific exceptions it expects and maps them to a
-status code (409 for a duplicate display name, 404 for a chapter reference that
-doesn't exist); anything else propagates as an unhandled exception, which FastAPI
-turns into a 500 rather than silently mislabeling an unexpected failure as one of the
-known cases.
+- **Repositories don't decide anything.** `hero_repository.get_hero` returns `Hero |
+  None`; it does not raise `NotFoundError` itself. `catalog_service.get_hero` is the
+  one-line wrapper that turns `None` into `NotFoundError` — because "missing means 404"
+  is a decision about the request, not a fact about the database.
+- **Only `app/services/equipment_service.py` touches an equip/active/slot field.**
+  `HeroOwnershipUpdate`, `ArmorOwnershipUpdate`, etc. (`app/schemas/ownership.py`) don't
+  even have `is_active` / `is_equipped` / `socket_index` / `equipped_slot` as fields —
+  sending one in a `PATCH` request body is silently ignored, not rejected — so the only
+  path that can change what's equipped is the dedicated action endpoint built to
+  replace whatever was there before. This is what
+  `tests/backend/test_api_ownership.py::test_update_hero_ownership_cannot_set_is_active`
+  and the sibling armor-slot test check.
+
+### Consistent error envelope
+
+Every error response — a domain error raised in `services/`, a Pydantic validation
+failure, a route that doesn't exist, or a genuine unhandled bug — comes back as
+`{"error": {"type": ..., "message": ..., "details": ...}}`. `app/core/exceptions.py`
+defines two exceptions services raise (`NotFoundError`, `ConflictError`; both a plain
+`Exception` subclass, no FastAPI import, so they're safe to raise from anywhere in
+`services/` or `repositories/`); `app/api/error_handlers.py` registers the FastAPI
+exception handlers that turn each one — plus `RequestValidationError`, any
+`HTTPException`, and finally the bare `Exception` catch-all — into that same shape.
+A client never has to special-case "is this our error format or FastAPI's default
+one"; there's only one.
+
+**Production note:** FastAPI's debug mode (`Settings.debug`, `ARCHERO_DEBUG`) changes
+this. When `debug=True` (the default — convenient for local development, where seeing
+a full traceback in the browser is useful), Starlette's `ServerErrorMiddleware` renders
+*its own* HTML/text traceback page for an unhandled exception instead of invoking the
+registered `Exception` handler at all — the registration doesn't get ignored so much as
+pre-empted by a higher-priority debug feature. That means an unexpected bug in
+production, if `ARCHERO_DEBUG` were left unset, would return a raw stack trace to the
+client instead of the clean `internal_error` envelope — the opposite of what "don't
+leak SQL/internals" is supposed to guarantee. **Deployments must set
+`ARCHERO_DEBUG=false`.** `tests/backend/test_error_handling.py`'s 500 test documents
+this by constructing a `debug=False` app instance specifically, rather than using the
+shared (debug-mode) test fixture, and comments explain why.
 
 ### Versioned prefix
 
@@ -231,14 +268,54 @@ adding a `/api/v2/...` line later doesn't require moving anything that already s
 under `/api/v1/...`. `/health` stays unversioned since it's infrastructure (load
 balancer / uptime checks), not a versioned resource.
 
-### Pagination
+### Pagination and filtering
 
-`GET /heroes` / `GET /weapons` / `GET /skills` take `limit` (default 50, max 200) and
-`offset` (default 0) query parameters and return a plain JSON array — no wrapper
-envelope with a total count, since nothing in Module 2 needs one yet and it's trivial
-to add non-breaking (a new optional field) if a future page needs it. The `limit`
-ceiling exists so a catalog that grows to thousands of rows can't be requested in one
-unbounded response.
+Every catalog list endpoint (`GET /heroes`, `/weapons`, `/armor`, `/rings`, `/amulets`,
+`/pets`, `/runes`, `/skills`, `/chapters`) takes `limit` (default 50, max 200) and
+`offset` (default 0) query parameters and returns a plain JSON array — no wrapper
+envelope with a total count, since nothing needs one yet and it's trivial to add
+non-breaking (a new optional field) later. The `limit` ceiling exists so a catalog that
+grows to thousands of rows can't be requested in one unbounded response. Most also take
+an optional `rarity` filter, plus whichever filter is specific to that resource
+(`hero_class` for heroes, `slot` for armor, `weapon_type` for weapons, `rune_type` for
+runes, `skill_type` for skills) — applied as plain `WHERE` clauses in the repository
+(`app/repositories/*_repository.py`), not client-side, so filtering scales with the
+catalog rather than the response size.
+
+### Equip actions: clear-then-set, never a separate unequip call
+
+Every function in `app/services/equipment_service.py` (`activate_hero`, `equip_weapon`,
+`equip_rune`, ...) follows the same two-step order: **first** clear whatever else
+currently occupies the same slot/category for the account, **then** set the target
+row's flag. That order is not incidental — the partial unique index backing "at most
+one equipped" (see "Equipped-slot rules" above) would reject the moment two rows are
+true at once, so the only way to get from "A is equipped" to "B is equipped" without
+ever passing through an invalid intermediate state visible to a concurrent reader is to
+clear first. Both steps commit together in one `db.commit()`
+(`app/repositories/ownership.py::save_ownership`), so a client genuinely never needs a
+separate "unequip the old one" request — that's the entire point of these endpoints
+over the plain ownership `PATCH`.
+
+Three shapes of "clear the other one," from simplest to most specific:
+
+- **Whole-account, one boolean flag** (hero `is_active`, pet `is_active`, weapon/ring/
+  amulet `is_equipped`): `ownership_repo.clear_other_equipped` — a single generic bulk
+  `UPDATE` parameterized by model class and flag name.
+- **Scoped by an extra column** (armor `is_equipped`, scoped to `slot` — a helmet and a
+  pair of boots can both be equipped at once): the same `clear_other_equipped` helper,
+  given an extra `WHERE` clause (`UserArmorOwnership.slot == instance.slot`).
+- **Two columns that must agree, keyed by a numeric index rather than a boolean**
+  (rune `socket_index` + `is_equipped`; skill `equipped_slot`):
+  `clear_rune_socket` / `clear_skill_slot`, two purpose-built repository functions —
+  genuinely different from the boolean-flag case, not just the same helper with more
+  arguments, since "equip rune X into socket N" also has to handle rune X itself
+  already sitting in a *different* socket (handled by simply overwriting
+  `instance.socket_index` — no separate clear needed for the row being moved).
+
+Equipping a skill additionally requires `is_unlocked` to already be true —
+`equip_skill` raises `ConflictError` (409) otherwise, checked *before* anything is
+cleared, so a locked-skill equip attempt never disturbs whatever was already equipped
+in that slot (`tests/backend/test_api_equipment.py::test_equip_skill_failure_does_not_disturb_existing_equipped_skill`).
 
 ### Testing FastAPI against the in-memory SQLite fixture
 

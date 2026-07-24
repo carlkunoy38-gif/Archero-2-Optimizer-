@@ -5,9 +5,18 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domain.models import Skill
+from app.domain.models import Skill, SkillType
 
 
-def list_skills(db: Session, *, limit: int, offset: int) -> list[Skill]:
-    stmt = select(Skill).order_by(Skill.id).offset(offset).limit(limit)
+def list_skills(
+    db: Session, *, limit: int, offset: int, skill_type: SkillType | None = None
+) -> list[Skill]:
+    stmt = select(Skill).order_by(Skill.id)
+    if skill_type is not None:
+        stmt = stmt.where(Skill.skill_type == skill_type)
+    stmt = stmt.offset(offset).limit(limit)
     return list(db.scalars(stmt).all())
+
+
+def get_skill(db: Session, skill_id: int) -> Skill | None:
+    return db.get(Skill, skill_id)
