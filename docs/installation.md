@@ -44,14 +44,22 @@ mypy app
 
 ## Switching to PostgreSQL
 
+Install the optional `postgres` extra (adds the `psycopg` driver):
+
+```bash
+pip install -e ".[postgres]"
+```
+
 Set `ARCHERO_DATABASE_URL` in `.env` to a PostgreSQL DSN, e.g.:
 
 ```
 ARCHERO_DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/archero2
 ```
 
-Install the driver (`pip install psycopg[binary]`), then run `alembic upgrade head`
-again — no application code changes are required.
+Then run `alembic upgrade head` again — no application code changes are required.
+Note: the SQLite-only integrity fixes documented in `docs/architecture.md`
+("Referential integrity") — enabling `PRAGMA foreign_keys` — are no-ops on PostgreSQL,
+which enforces foreign keys unconditionally, so behavior is consistent either way.
 
 ## Frontend setup
 

@@ -20,6 +20,11 @@ dev = [
     "ruff>=0.7,<1.0",
     "mypy>=1.11,<2.0",
 ]
+# Only needed when ARCHERO_DATABASE_URL points at PostgreSQL instead of
+# the SQLite default; see docs/installation.md.
+postgres = [
+    "psycopg[binary]>=3.2,<4.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

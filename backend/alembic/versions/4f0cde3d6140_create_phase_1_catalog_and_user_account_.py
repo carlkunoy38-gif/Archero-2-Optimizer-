@@ -1,8 +1,8 @@
 """create phase 1 catalog and user account schema
 
-Revision ID: a4dd33969a4f
+Revision ID: 4f0cde3d6140
 Revises: 
-Create Date: 2026-07-24 14:55:14.636619
+Create Date: 2026-07-24 15:34:49.258387
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a4dd33969a4f'
+revision: str = '4f0cde3d6140'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -152,7 +152,11 @@ def upgrade() -> None:
     sa.Column('current_chapter_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['current_chapter_id'], ['chapters.id'], name=op.f('fk_user_accounts_current_chapter_id_chapters')),
+    sa.CheckConstraint('combat_power >= 0', name=op.f('ck_user_accounts_combat_power_non_negative')),
+    sa.CheckConstraint('energy >= 0', name=op.f('ck_user_accounts_energy_non_negative')),
+    sa.CheckConstraint('gems >= 0', name=op.f('ck_user_accounts_gems_non_negative')),
+    sa.CheckConstraint('gold >= 0', name=op.f('ck_user_accounts_gold_non_negative')),
+    sa.ForeignKeyConstraint(['current_chapter_id'], ['chapters.id'], name=op.f('fk_user_accounts_current_chapter_id_chapters'), ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_accounts'))
     )
     op.create_index(op.f('ix_user_accounts_display_name'), 'user_accounts', ['display_name'], unique=True)
@@ -164,13 +168,15 @@ def upgrade() -> None:
     sa.Column('is_equipped', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_amulet_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['amulet_id'], ['amulets.id'], name=op.f('fk_user_amulet_ownership_amulet_id_amulets')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_amulet_ownership_level_min')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_amulet_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['amulet_id'], ['amulets.id'], name=op.f('fk_user_amulet_ownership_amulet_id_amulets'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_amulet_ownership')),
-    sa.UniqueConstraint('account_id', 'amulet_id', name=op.f('uq_user_amulet_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'amulet_id', name=op.f('uq_user_amulet_ownership_account_id_amulet_id'))
     )
     op.create_index(op.f('ix_user_amulet_ownership_account_id'), 'user_amulet_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_amulet_ownership_amulet_id'), 'user_amulet_ownership', ['amulet_id'], unique=False)
+    op.create_index('uq_user_amulet_ownership_one_equipped_per_account', 'user_amulet_ownership', ['account_id'], unique=True, sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.create_table('user_armor_ownership',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('account_id', sa.Integer(), nullable=False),
@@ -178,15 +184,19 @@ def upgrade() -> None:
     sa.Column('level', sa.Integer(), nullable=False),
     sa.Column('star_level', sa.Integer(), nullable=False),
     sa.Column('is_equipped', sa.Boolean(), nullable=False),
+    sa.Column('slot', sa.Enum('HELMET', 'CHEST', 'GLOVES', 'BOOTS', name='armor_slot_ownership'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_armor_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['armor_id'], ['armor.id'], name=op.f('fk_user_armor_ownership_armor_id_armor')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_armor_ownership_level_min')),
+    sa.CheckConstraint('star_level >= 0', name=op.f('ck_user_armor_ownership_star_level_non_negative')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_armor_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['armor_id'], ['armor.id'], name=op.f('fk_user_armor_ownership_armor_id_armor'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_armor_ownership')),
-    sa.UniqueConstraint('account_id', 'armor_id', name=op.f('uq_user_armor_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'armor_id', name=op.f('uq_user_armor_ownership_account_id_armor_id'))
     )
     op.create_index(op.f('ix_user_armor_ownership_account_id'), 'user_armor_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_armor_ownership_armor_id'), 'user_armor_ownership', ['armor_id'], unique=False)
+    op.create_index('uq_user_armor_ownership_one_equipped_per_slot', 'user_armor_ownership', ['account_id', 'slot'], unique=True, sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.create_table('user_chapter_progress',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('account_id', sa.Integer(), nullable=False),
@@ -196,10 +206,12 @@ def upgrade() -> None:
     sa.Column('attempts', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_chapter_progress_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['chapter_id'], ['chapters.id'], name=op.f('fk_user_chapter_progress_chapter_id_chapters')),
+    sa.CheckConstraint('attempts >= 0', name=op.f('ck_user_chapter_progress_attempts_non_negative')),
+    sa.CheckConstraint('stars_earned >= 0', name=op.f('ck_user_chapter_progress_stars_earned_non_negative')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_chapter_progress_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['chapter_id'], ['chapters.id'], name=op.f('fk_user_chapter_progress_chapter_id_chapters'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_chapter_progress')),
-    sa.UniqueConstraint('account_id', 'chapter_id', name=op.f('uq_user_chapter_progress_account_id'))
+    sa.UniqueConstraint('account_id', 'chapter_id', name=op.f('uq_user_chapter_progress_account_id_chapter_id'))
     )
     op.create_index(op.f('ix_user_chapter_progress_account_id'), 'user_chapter_progress', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_chapter_progress_chapter_id'), 'user_chapter_progress', ['chapter_id'], unique=False)
@@ -212,13 +224,16 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_hero_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['hero_id'], ['heroes.id'], name=op.f('fk_user_hero_ownership_hero_id_heroes')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_hero_ownership_level_min')),
+    sa.CheckConstraint('stars >= 0', name=op.f('ck_user_hero_ownership_stars_non_negative')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_hero_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['hero_id'], ['heroes.id'], name=op.f('fk_user_hero_ownership_hero_id_heroes'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_hero_ownership')),
-    sa.UniqueConstraint('account_id', 'hero_id', name=op.f('uq_user_hero_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'hero_id', name=op.f('uq_user_hero_ownership_account_id_hero_id'))
     )
     op.create_index(op.f('ix_user_hero_ownership_account_id'), 'user_hero_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_hero_ownership_hero_id'), 'user_hero_ownership', ['hero_id'], unique=False)
+    op.create_index('uq_user_hero_ownership_one_active_per_account', 'user_hero_ownership', ['account_id'], unique=True, sqlite_where=sa.text('is_active'), postgresql_where=sa.text('is_active'))
     op.create_table('user_pet_ownership',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('account_id', sa.Integer(), nullable=False),
@@ -227,13 +242,15 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_pet_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['pet_id'], ['pets.id'], name=op.f('fk_user_pet_ownership_pet_id_pets')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_pet_ownership_level_min')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_pet_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['pet_id'], ['pets.id'], name=op.f('fk_user_pet_ownership_pet_id_pets'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_pet_ownership')),
-    sa.UniqueConstraint('account_id', 'pet_id', name=op.f('uq_user_pet_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'pet_id', name=op.f('uq_user_pet_ownership_account_id_pet_id'))
     )
     op.create_index(op.f('ix_user_pet_ownership_account_id'), 'user_pet_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_pet_ownership_pet_id'), 'user_pet_ownership', ['pet_id'], unique=False)
+    op.create_index('uq_user_pet_ownership_one_active_per_account', 'user_pet_ownership', ['account_id'], unique=True, sqlite_where=sa.text('is_active'), postgresql_where=sa.text('is_active'))
     op.create_table('user_ring_ownership',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('account_id', sa.Integer(), nullable=False),
@@ -242,13 +259,15 @@ def upgrade() -> None:
     sa.Column('is_equipped', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_ring_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['ring_id'], ['rings.id'], name=op.f('fk_user_ring_ownership_ring_id_rings')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_ring_ownership_level_min')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_ring_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['ring_id'], ['rings.id'], name=op.f('fk_user_ring_ownership_ring_id_rings'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_ring_ownership')),
-    sa.UniqueConstraint('account_id', 'ring_id', name=op.f('uq_user_ring_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'ring_id', name=op.f('uq_user_ring_ownership_account_id_ring_id'))
     )
     op.create_index(op.f('ix_user_ring_ownership_account_id'), 'user_ring_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_ring_ownership_ring_id'), 'user_ring_ownership', ['ring_id'], unique=False)
+    op.create_index('uq_user_ring_ownership_one_equipped_per_account', 'user_ring_ownership', ['account_id'], unique=True, sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.create_table('user_rune_ownership',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('account_id', sa.Integer(), nullable=False),
@@ -258,10 +277,14 @@ def upgrade() -> None:
     sa.Column('socket_index', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_rune_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['rune_id'], ['runes.id'], name=op.f('fk_user_rune_ownership_rune_id_runes')),
+    sa.CheckConstraint('(socket_index IS NULL AND NOT is_equipped) OR (socket_index IS NOT NULL AND is_equipped)', name=op.f('ck_user_rune_ownership_equipped_matches_socket')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_rune_ownership_level_min')),
+    sa.CheckConstraint('socket_index IS NULL OR socket_index >= 0', name=op.f('ck_user_rune_ownership_socket_index_non_negative')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_rune_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['rune_id'], ['runes.id'], name=op.f('fk_user_rune_ownership_rune_id_runes'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_rune_ownership')),
-    sa.UniqueConstraint('account_id', 'rune_id', name=op.f('uq_user_rune_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'rune_id', name=op.f('uq_user_rune_ownership_account_id_rune_id')),
+    sa.UniqueConstraint('account_id', 'socket_index', name=op.f('uq_user_rune_ownership_account_id_socket_index'))
     )
     op.create_index(op.f('ix_user_rune_ownership_account_id'), 'user_rune_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_rune_ownership_rune_id'), 'user_rune_ownership', ['rune_id'], unique=False)
@@ -273,10 +296,13 @@ def upgrade() -> None:
     sa.Column('equipped_slot', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_skill_selection_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['skill_id'], ['skills.id'], name=op.f('fk_user_skill_selection_skill_id_skills')),
+    sa.CheckConstraint('equipped_slot IS NULL OR equipped_slot >= 0', name=op.f('ck_user_skill_selection_equipped_slot_non_negative')),
+    sa.CheckConstraint('equipped_slot IS NULL OR is_unlocked', name=op.f('ck_user_skill_selection_equipped_requires_unlocked')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_skill_selection_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['skill_id'], ['skills.id'], name=op.f('fk_user_skill_selection_skill_id_skills'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_skill_selection')),
-    sa.UniqueConstraint('account_id', 'skill_id', name=op.f('uq_user_skill_selection_account_id'))
+    sa.UniqueConstraint('account_id', 'equipped_slot', name=op.f('uq_user_skill_selection_account_id_equipped_slot')),
+    sa.UniqueConstraint('account_id', 'skill_id', name=op.f('uq_user_skill_selection_account_id_skill_id'))
     )
     op.create_index(op.f('ix_user_skill_selection_account_id'), 'user_skill_selection', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_skill_selection_skill_id'), 'user_skill_selection', ['skill_id'], unique=False)
@@ -289,19 +315,23 @@ def upgrade() -> None:
     sa.Column('is_equipped', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_weapon_ownership_account_id_user_accounts')),
-    sa.ForeignKeyConstraint(['weapon_id'], ['weapons.id'], name=op.f('fk_user_weapon_ownership_weapon_id_weapons')),
+    sa.CheckConstraint('level >= 1', name=op.f('ck_user_weapon_ownership_level_min')),
+    sa.CheckConstraint('star_level >= 0', name=op.f('ck_user_weapon_ownership_star_level_non_negative')),
+    sa.ForeignKeyConstraint(['account_id'], ['user_accounts.id'], name=op.f('fk_user_weapon_ownership_account_id_user_accounts'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['weapon_id'], ['weapons.id'], name=op.f('fk_user_weapon_ownership_weapon_id_weapons'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_user_weapon_ownership')),
-    sa.UniqueConstraint('account_id', 'weapon_id', name=op.f('uq_user_weapon_ownership_account_id'))
+    sa.UniqueConstraint('account_id', 'weapon_id', name=op.f('uq_user_weapon_ownership_account_id_weapon_id'))
     )
     op.create_index(op.f('ix_user_weapon_ownership_account_id'), 'user_weapon_ownership', ['account_id'], unique=False)
     op.create_index(op.f('ix_user_weapon_ownership_weapon_id'), 'user_weapon_ownership', ['weapon_id'], unique=False)
+    op.create_index('uq_user_weapon_ownership_one_equipped_per_account', 'user_weapon_ownership', ['account_id'], unique=True, sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index('uq_user_weapon_ownership_one_equipped_per_account', table_name='user_weapon_ownership', sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.drop_index(op.f('ix_user_weapon_ownership_weapon_id'), table_name='user_weapon_ownership')
     op.drop_index(op.f('ix_user_weapon_ownership_account_id'), table_name='user_weapon_ownership')
     op.drop_table('user_weapon_ownership')
@@ -311,21 +341,26 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_user_rune_ownership_rune_id'), table_name='user_rune_ownership')
     op.drop_index(op.f('ix_user_rune_ownership_account_id'), table_name='user_rune_ownership')
     op.drop_table('user_rune_ownership')
+    op.drop_index('uq_user_ring_ownership_one_equipped_per_account', table_name='user_ring_ownership', sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.drop_index(op.f('ix_user_ring_ownership_ring_id'), table_name='user_ring_ownership')
     op.drop_index(op.f('ix_user_ring_ownership_account_id'), table_name='user_ring_ownership')
     op.drop_table('user_ring_ownership')
+    op.drop_index('uq_user_pet_ownership_one_active_per_account', table_name='user_pet_ownership', sqlite_where=sa.text('is_active'), postgresql_where=sa.text('is_active'))
     op.drop_index(op.f('ix_user_pet_ownership_pet_id'), table_name='user_pet_ownership')
     op.drop_index(op.f('ix_user_pet_ownership_account_id'), table_name='user_pet_ownership')
     op.drop_table('user_pet_ownership')
+    op.drop_index('uq_user_hero_ownership_one_active_per_account', table_name='user_hero_ownership', sqlite_where=sa.text('is_active'), postgresql_where=sa.text('is_active'))
     op.drop_index(op.f('ix_user_hero_ownership_hero_id'), table_name='user_hero_ownership')
     op.drop_index(op.f('ix_user_hero_ownership_account_id'), table_name='user_hero_ownership')
     op.drop_table('user_hero_ownership')
     op.drop_index(op.f('ix_user_chapter_progress_chapter_id'), table_name='user_chapter_progress')
     op.drop_index(op.f('ix_user_chapter_progress_account_id'), table_name='user_chapter_progress')
     op.drop_table('user_chapter_progress')
+    op.drop_index('uq_user_armor_ownership_one_equipped_per_slot', table_name='user_armor_ownership', sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.drop_index(op.f('ix_user_armor_ownership_armor_id'), table_name='user_armor_ownership')
     op.drop_index(op.f('ix_user_armor_ownership_account_id'), table_name='user_armor_ownership')
     op.drop_table('user_armor_ownership')
+    op.drop_index('uq_user_amulet_ownership_one_equipped_per_account', table_name='user_amulet_ownership', sqlite_where=sa.text('is_equipped'), postgresql_where=sa.text('is_equipped'))
     op.drop_index(op.f('ix_user_amulet_ownership_amulet_id'), table_name='user_amulet_ownership')
     op.drop_index(op.f('ix_user_amulet_ownership_account_id'), table_name='user_amulet_ownership')
     op.drop_table('user_amulet_ownership')

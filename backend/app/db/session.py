@@ -3,46 +3,77 @@
 Kept deliberately thin: one engine per process, one session per request.
 Switching from SQLite to PostgreSQL is a one-line change to
 ``ARCHERO_DATABASE_URL`` — nothing here is SQLite-specific except the
-``check_same_thread`` connect arg, which PostgreSQL simply ignores because
-it is only applied for ``sqlite://`` URLs.
+``check_same_thread`` connect arg and the foreign-key pragma below, both
+of which are no-ops for any other dialect.
 """
 
 from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 
 
-def _build_engine() -> Engine:
-    settings = get_settings()
+def enable_sqlite_foreign_keys(engine: Engine) -> None:
+    """Turn on SQLite's foreign-key enforcement for every connection made
+    by ``engine``.
+
+    SQLite ships with foreign-key checking OFF by default for backwards
+    compatibility. Without this, an ownership row can silently reference
+    an account or catalog item that does not exist, and ``ON DELETE``
+    rules on the foreign keys are never applied. PostgreSQL enforces
+    foreign keys unconditionally, so this only matters for SQLite.
+    """
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection: Any, connection_record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
+def build_engine(database_url: str, *, echo: bool = False) -> Engine:
+    """Build an engine for ``database_url`` with SQLite-specific setup applied.
+
+    Factored out from the module-level ``engine`` so tests (e.g. an
+    Alembic upgrade/downgrade round-trip against a temp-file database)
+    can construct an independent engine with identical connection
+    behavior to the one the running application uses.
+    """
+
     connect_args: dict[str, object] = {}
 
-    if settings.database_url.startswith("sqlite"):
-        # SQLite forbids sharing a connection across threads by default;
-        # FastAPI's request handling can hop threads, so this must be
-        # disabled. Safe because each request still gets its own Session.
+    if database_url.startswith("sqlite"):
+        # FastAPI's request handling can hop threads; each request still
+        # gets its own Session, so sharing the underlying connection
+        # across threads is safe.
         connect_args["check_same_thread"] = False
 
         # Ensure the parent directory for a file-based SQLite DB exists
-        # (e.g. "sqlite:///./database/archero2.db" -> ./database/).
-        db_path = settings.database_url.removeprefix("sqlite:///")
+        # (e.g. sqlite:////abs/path/database/archero2.db -> .../database/).
+        db_path = database_url.removeprefix("sqlite:///")
         if db_path and db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    return create_engine(
-        settings.database_url,
-        connect_args=connect_args,
-        echo=settings.debug,
-        future=True,
-    )
+    engine = create_engine(database_url, connect_args=connect_args, echo=echo, future=True)
+
+    if database_url.startswith("sqlite"):
+        enable_sqlite_foreign_keys(engine)
+
+    return engine
 
 
-engine: Engine = _build_engine()
+def _build_default_engine() -> Engine:
+    settings = get_settings()
+    return build_engine(settings.database_url, echo=settings.sql_echo)
+
+
+engine: Engine = _build_default_engine()
 
 SessionLocal: sessionmaker[Session] = sessionmaker(
     bind=engine,

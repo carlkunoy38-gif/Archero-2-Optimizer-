@@ -16,7 +16,9 @@ implemented, tested, and reviewed before the next one starts. See the root READM
    (e.g. it won't infer a column rename, it'll see it as drop+add) — and adjust by
    hand if needed.
 5. Apply it locally: `alembic upgrade head`.
-6. Add/update tests in `tests/backend/test_models.py`.
+6. Add/update tests — model shape and relationships go in
+   `tests/backend/test_models.py`; FK/CHECK/uniqueness rules go in
+   `tests/backend/test_constraints.py`.
 7. Run `ruff check .`, `mypy app`, and `pytest ../tests/backend` before committing.
 
 ## Conventions
@@ -27,8 +29,21 @@ implemented, tested, and reviewed before the next one starts. See the root READM
 - **Catalog vs. ownership.** Static game data goes on the catalog entity (`Hero`,
   `Weapon`, ...). Anything that varies per player (level, stars, equipped) goes on the
   matching `User<Entity>Ownership` table. See `docs/architecture.md`.
+- **The database enforces its own invariants — it does not trust the API layer.**
+  A value that should never be negative gets a `CheckConstraint`, not just a Pydantic
+  validator in Module 2. A row that should be unique per account (an equipped slot, a
+  socket index) gets a real unique constraint or partial unique index. See
+  "Equipped-slot rules" and "Value constraints" in `docs/architecture.md` before adding
+  a new `is_equipped`/`is_active`/slot-index style column — decide and enforce the
+  cardinality rule in the same change that adds the column.
+- **Every foreign key states its `ondelete` rule explicitly** — `CASCADE` for
+  `account_id` (deleting an account takes its data with it), `RESTRICT` for a
+  reference to catalog data (can't delete a `Hero` that's currently owned), `SET NULL`
+  for an optional "currently pointing at" reference. Don't leave `ondelete` unset and
+  rely on the ORM's Python-side cascade — that only runs for objects the ORM itself
+  loaded, never for a bulk delete or raw SQL.
 - **Settings, not hardcoded config.** Anything environment-specific (DB URL, log
-  level, debug flag) goes through `app.core.config.Settings`, sourced from
+  level, debug flag, SQL echo) goes through `app.core.config.Settings`, sourced from
   `ARCHERO_*` environment variables — never hardcode a connection string or path in
   application code.
 - **Game data placeholders are explicit.** Any model or seed value that stands in for
@@ -38,10 +53,19 @@ implemented, tested, and reviewed before the next one starts. See the root READM
 ## Testing philosophy
 
 Model tests use an in-memory SQLite database (`tests/backend/conftest.py`) recreated
-fresh per test — no shared test database, no ordering dependencies between tests.
-Prefer testing behavior that would actually break silently (uniqueness constraints,
-cascade behavior, relationship navigation in both directions) over trivial
-attribute-assignment tests.
+fresh per test via `app.db.session.build_engine` — the same connection setup
+(including `PRAGMA foreign_keys=ON`) the running application uses, not a bare
+`create_engine`, so tests exercise real behavior rather than a laxer stand-in. No
+shared test database, no ordering dependencies between tests.
+
+Prefer testing behavior that would actually break silently over trivial
+attribute-assignment tests: uniqueness constraints, `ondelete` cascade/restrict/set-null
+behavior (ideally via a raw core `delete()`/`insert()` that bypasses the ORM's own
+cascade logic, so the test proves the *database* enforces it), relationship navigation
+in both directions, and CHECK-constraint edge cases. `tests/backend/test_migrations.py`
+additionally runs the real Alembic upgrade/downgrade chain against a temp-file
+database — don't assume `Base.metadata.create_all()` (used by the in-memory fixture)
+and the actual migration scripts stay in sync; test both.
 
 ## Branching
 

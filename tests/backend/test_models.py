@@ -4,11 +4,15 @@ Covers: each catalog entity can be created, UserAccount ownership
 relationships resolve in both directions, uniqueness constraints on
 ownership tables are enforced, and deleting a UserAccount cascades to
 its ownership rows without touching the shared catalog rows.
+
+Uses SQLAlchemy 2.0 ``select()``/``db.scalars()`` throughout rather than
+the legacy ``Query.query()`` API.
 """
 
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -72,13 +76,13 @@ def sample_chapter(db: Session) -> Chapter:
 
 class TestCatalogModels:
     def test_hero_roundtrip(self, db: Session, sample_hero: Hero) -> None:
-        fetched = db.query(Hero).filter_by(name="Sample Hero").one()
+        fetched = db.scalars(select(Hero).where(Hero.name == "Sample Hero")).one()
         assert fetched.hero_class is HeroClass.WARRIOR
         assert fetched.rarity is Rarity.EPIC
         assert fetched.base_hp == 1000.0
 
     def test_weapon_roundtrip(self, db: Session, sample_weapon: Weapon) -> None:
-        fetched = db.query(Weapon).filter_by(name="Sample Bow").one()
+        fetched = db.scalars(select(Weapon).where(Weapon.name == "Sample Bow")).one()
         assert fetched.weapon_type == "bow"
         assert fetched.rarity is Rarity.RARE
 
@@ -88,7 +92,7 @@ class TestCatalogModels:
         )
         db.add(armor)
         db.commit()
-        fetched = db.query(Armor).filter_by(name="Sample Helmet").one()
+        fetched = db.scalars(select(Armor).where(Armor.name == "Sample Helmet")).one()
         assert fetched.slot is ArmorSlot.HELMET
 
     def test_ring_roundtrip(self, db: Session) -> None:
@@ -100,7 +104,7 @@ class TestCatalogModels:
         )
         db.add(ring)
         db.commit()
-        fetched = db.query(Ring).filter_by(name="Sample Ring").one()
+        fetched = db.scalars(select(Ring).where(Ring.name == "Sample Ring")).one()
         assert fetched.primary_stat is StatType.CRIT_CHANCE
 
     def test_amulet_roundtrip(self, db: Session) -> None:
@@ -112,7 +116,7 @@ class TestCatalogModels:
         )
         db.add(amulet)
         db.commit()
-        fetched = db.query(Amulet).filter_by(name="Sample Amulet").one()
+        fetched = db.scalars(select(Amulet).where(Amulet.name == "Sample Amulet")).one()
         assert fetched.primary_stat is StatType.ATTACK
 
     def test_pet_roundtrip(self, db: Session) -> None:
@@ -124,26 +128,26 @@ class TestCatalogModels:
         )
         db.add(pet)
         db.commit()
-        fetched = db.query(Pet).filter_by(name="Sample Pet").one()
+        fetched = db.scalars(select(Pet).where(Pet.name == "Sample Pet")).one()
         assert fetched.bonus_stat is StatType.HEALTH
 
     def test_rune_roundtrip(self, db: Session) -> None:
         rune = Rune(name="Sample Rune", rune_type=RuneType.OFFENSE, rarity=Rarity.EPIC)
         db.add(rune)
         db.commit()
-        fetched = db.query(Rune).filter_by(name="Sample Rune").one()
+        fetched = db.scalars(select(Rune).where(Rune.name == "Sample Rune")).one()
         assert fetched.rune_type is RuneType.OFFENSE
 
     def test_skill_roundtrip(self, db: Session) -> None:
         skill = Skill(name="Sample Skill", skill_type=SkillType.OFFENSIVE, tier=2)
         db.add(skill)
         db.commit()
-        fetched = db.query(Skill).filter_by(name="Sample Skill").one()
+        fetched = db.scalars(select(Skill).where(Skill.name == "Sample Skill")).one()
         assert fetched.skill_type is SkillType.OFFENSIVE
         assert fetched.tier == 2
 
     def test_chapter_roundtrip(self, db: Session, sample_chapter: Chapter) -> None:
-        fetched = db.query(Chapter).filter_by(number=1).one()
+        fetched = db.scalars(select(Chapter).where(Chapter.number == 1)).one()
         assert fetched.name == "Whispering Forest"
 
 
@@ -159,7 +163,9 @@ class TestUserAccountRelationships:
         db.add(ownership)
         db.commit()
 
-        fetched = db.query(UserAccount).filter_by(display_name="carl").one()
+        fetched = db.scalars(
+            select(UserAccount).where(UserAccount.display_name == "carl")
+        ).one()
         assert len(fetched.heroes) == 1
         assert fetched.heroes[0].level == 10
         assert fetched.heroes[0].hero.name == "Sample Hero"
@@ -171,7 +177,9 @@ class TestUserAccountRelationships:
         db.add(account)
         db.commit()
 
-        fetched = db.query(UserAccount).filter_by(display_name="carl").one()
+        fetched = db.scalars(
+            select(UserAccount).where(UserAccount.display_name == "carl")
+        ).one()
         assert fetched.current_chapter is not None
         assert fetched.current_chapter.name == "Whispering Forest"
         assert fetched in sample_chapter.accounts_current_here
@@ -204,11 +212,17 @@ class TestUserAccountRelationships:
         db.delete(account)
         db.commit()
 
-        assert db.query(UserHeroOwnership).count() == 0
-        assert db.query(UserWeaponOwnership).count() == 0
+        assert db.scalar(select(func.count()).select_from(UserHeroOwnership)) == 0
+        assert db.scalar(select(func.count()).select_from(UserWeaponOwnership)) == 0
         # Catalog rows are untouched by deleting the account that owned them.
-        assert db.query(Hero).filter_by(name="Sample Hero").one_or_none() is not None
-        assert db.query(Weapon).filter_by(name="Sample Bow").one_or_none() is not None
+        assert (
+            db.scalars(select(Hero).where(Hero.name == "Sample Hero")).one_or_none()
+            is not None
+        )
+        assert (
+            db.scalars(select(Weapon).where(Weapon.name == "Sample Bow")).one_or_none()
+            is not None
+        )
 
     def test_display_name_is_unique(self, db: Session) -> None:
         db.add(UserAccount(display_name="carl"))

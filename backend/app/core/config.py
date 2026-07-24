@@ -49,6 +49,13 @@ class Settings(BaseSettings):
         default_factory=lambda: f"sqlite:///{_DEFAULT_SQLITE_PATH}"
     )
 
+    # Whether SQLAlchemy logs every SQL statement it executes. Kept
+    # separate from `debug` on purpose: `debug` toggles things like
+    # FastAPI's error pages, but SQL echo is noisy and can end up logging
+    # user-entered values, so it needs its own opt-in even in a debug
+    # environment.
+    sql_echo: bool = Field(default=False)
+
     log_level: str = Field(default="INFO")
 
     api_v1_prefix: str = "/api/v1"

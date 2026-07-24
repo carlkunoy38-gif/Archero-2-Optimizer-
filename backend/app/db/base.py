@@ -12,9 +12,15 @@ from __future__ import annotations
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
 
+# "uq" uses %(column_0_N_name)s (all columns, underscore-joined) rather
+# than the more common %(column_0_name)s (first column only): several
+# ownership tables have two unique constraints that share a leading
+# column (e.g. (account_id, hero_id) and, on a different table,
+# (account_id, socket_index)) — keying off only the first column would
+# make those collide on an identical generated name.
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
