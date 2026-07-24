@@ -103,5 +103,31 @@ which enforces foreign keys unconditionally, so behavior is consistent either wa
 
 ## Frontend setup
 
-Not yet scaffolded — see `frontend/README.md` for status. Instructions will be added
-here in Module 4.
+Requires the backend already running (see above) — the frontend has no data of its own.
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # adjust VITE_API_BASE_URL if the backend isn't on the default port
+npm run dev
+```
+
+Open `http://localhost:5173`. The backend's default CORS configuration
+(`Settings.cors_allow_origins`) already allows this origin.
+
+### Verify
+
+```bash
+npm run lint       # oxlint
+npm run typecheck   # tsc -b --noEmit
+npm run test        # vitest run
+npm run build       # type-check + production build
+```
+
+### What's actually functional
+
+**My Account** and **Build Optimizer** call the real API — create/switch an account,
+manage every ownership type, and get a real Skill Advisor recommendation. **Dashboard**,
+**Upgrade Advisor**, and **Settings** are placeholders that explain why they're not built
+yet (their backend advisors/endpoints don't exist) rather than showing fake data — see
+"Frontend architecture" in `docs/architecture.md`.

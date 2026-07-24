@@ -575,12 +575,71 @@ no class hierarchy) rather than a deliberate rejection of the review's design �
 behavior described in the review is what's implemented, under the project's established
 naming conventions instead of new ones introduced for this module alone.
 
-## What's not decided yet
+## Frontend architecture (Module 4)
 
-Module 4 (the frontend) will introduce its own design notes in this file as it lands.
+### Why My Account and Build Optimizer only, functionally
+
+The frontend (`frontend/`, React + TypeScript + Vite + Tailwind) has routes for all five
+pages from the original spec, but only **My Account** and **Build Optimizer** call real
+endpoints. **Dashboard**, **Upgrade Advisor**, and **Settings** render a shared
+`PlaceholderPage` explaining what backend piece is missing (an account-wide scoring
+model; a Gear/Upgrade/Resource Advisor; a weights read/write endpoint) instead of
+displaying invented numbers. This mirrors the project's core rule for the backend's own
+`GAME DATA PLACEHOLDER` values — never present a placeholder as if it were real data —
+applied to the frontend: a page that *looks* functional but returns fabricated numbers
+would be worse than an honest "not built yet" screen, since a player could act on it.
+
+### No client-side data model beyond the API's own shapes
+
+`src/lib/types.ts` is a set of plain TypeScript interfaces mirroring the backend's
+Pydantic schemas by hand — there is no OpenAPI codegen step. `src/lib/apiClient.ts` is a
+thin `fetch` wrapper (`api.listHeroes()`, `api.addHero(...)`, `api.adviseSkills(...)`,
+...) whose only real job is unwrapping the backend's one error envelope shape
+(`{error: {type, message, details}}`, see "Consistent error envelope" above) into a
+throwable `ApiError` — every page catches that and shows `error.message` directly,
+rather than each page re-implementing envelope parsing. If the backend and frontend
+types drift, a wrong field name fails loudly at runtime (`undefined` where a value was
+expected) rather than silently — an accepted tradeoff for a project this size without
+generated types.
+
+### No account list endpoint, so "current account" lives in the browser
+
+The backend has no `GET /accounts` (list) endpoint and no auth/session concept (see
+"API layer" above) — nothing server-side represents "which account the user is looking
+at right now." `useCurrentAccount` (`src/hooks/useCurrentAccount.ts`) tracks that choice
+in `localStorage` instead, shared between the My Account and Build Optimizer pages so
+switching between them keeps the same account selected. Switching to a different
+account ID verifies it exists (`GET /accounts/{id}`) before adopting it, rather than
+trusting an arbitrary client-typed number.
+
+### One generic ownership section, two that couldn't be
+
+Six of the seven ownership types (hero, weapon, armor, ring, amulet, pet) share the
+exact same shape: own something from a catalog, optionally give it a level/star, equip
+or unequip it, remove it. `src/components/OwnershipSection.tsx` is one component
+parameterized by that shape, instantiated six times in `MyAccountPage.tsx` — the same
+"one generic thing, not six near-identical copies" reasoning the backend used for
+`ownership_repo.clear_other_equipped`. Runes (equip needs a `socket_index`) and skill
+selections (equip needs an `equipped_slot`, plus an `is_unlocked` gate before a skill
+can be equipped at all, and no level/star fields) are genuinely different shapes, not
+just the same one with more props threaded through — they get their own
+`RuneSection.tsx`/`SkillSelectionSection.tsx` rather than being forced into
+`OwnershipSection`, the same "don't force a shared abstraction where the underlying
+problem actually differs" call the backend made for rune/skill equip logic
+(`clear_rune_socket`/`clear_skill_slot` versus the generic `clear_other_equipped`).
+
+Every mutation (add/update/remove/equip/unequip) re-fetches the whole account detail
+afterward rather than patching local state optimistically — equip actions can silently
+change *other* rows (clear-then-set replaces whatever was previously equipped), so the
+only way to stay correct is to ask the server what's true now, the same reason the
+backend's own equip endpoints return the full updated resource rather than a diff.
+
+### What's not decided yet
+
 The Gear Advisor, Farm Advisor, Upgrade Advisor, Rune Advisor, and Resource Advisor
 called for in the Module 3 spec are not built yet — each would add one module under
 `app/optimizer/advisors/`, reusing `engine.py`'s primitives, without changing
-`context.py`, `engine.py`, or `results.py`. The weighting model in `weights.py` in
+`context.py`, `engine.py`, or `results.py`; the Dashboard/Upgrade Advisor/Settings
+frontend pages stay placeholders until they do. The weighting model in `weights.py` in
 particular is meant to be revisited once real game data is available — see the root
 README's "Game data" section.

@@ -164,6 +164,36 @@ additionally runs the real Alembic upgrade/downgrade chain against a temp-file
 database — don't assume `Base.metadata.create_all()` (used by the in-memory fixture)
 and the actual migration scripts stay in sync; test both.
 
+## Frontend conventions
+
+- **A page either calls the real API or it's a `PlaceholderPage`.** Never wire a page
+  up to fabricated/hardcoded data to make it look done — Dashboard, Upgrade Advisor,
+  and Settings are `PlaceholderPage`s specifically because their backend endpoints
+  don't exist yet, not because building the UI was skipped. See "Frontend
+  architecture" in `docs/architecture.md`.
+- **Ownership-shaped UI is one generic component, not one per catalog type** — see
+  `OwnershipSection.tsx`, instantiated per type in `MyAccountPage.tsx`, and the two
+  genuinely different exceptions (`RuneSection.tsx`, `SkillSelectionSection.tsx`) that
+  correctly aren't forced into it. Reach for the generic component first; only build a
+  bespoke one when the equip/create shape actually differs (an extra required
+  parameter, a different gating rule), not just because the labels differ.
+- **After any mutation, refetch the account, don't patch local state.** Equip/unequip
+  actions can silently change *other* rows (clear-then-set). `MyAccountPage.tsx`'s
+  `refresh()` re-fetches `GET /accounts/{id}` after every add/update/remove/equip call
+  for this reason — resist the temptation to optimistically splice the response into
+  local state instead.
+- **New API calls go in `src/lib/apiClient.ts`, new shapes in `src/lib/types.ts`.**
+  Pages call `api.xyz(...)` and catch `ApiError`; they never call `fetch` directly or
+  hand-parse a response.
+- **Test with the real `api` module mocked, not `fetch`.** Page/component tests
+  (`*.test.tsx`) `vi.mock('../lib/apiClient')` and assert on calls to `api.xyz(...)`;
+  only `apiClient.test.ts` itself mocks `fetch`, since that's the one place responsible
+  for turning a raw response into `ApiError`/parsed JSON.
+- **Verify a UI change in the browser, not just `npm run test`.** Start the backend
+  (`uvicorn app.main:app --reload`) and the frontend (`npm run dev`) and click through
+  the actual flow before calling a change done — component tests catch regressions,
+  they don't substitute for having looked at the page.
+
 ## Branching
 
 All work for this project happens on `claude/archero2-optimizer-foundation-toa3l8`

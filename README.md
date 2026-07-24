@@ -37,15 +37,20 @@ This repository is being built module by module. Completed so far:
       marginal gain against an `ObjectiveProfile` (balanced/boss/farm/survival) rather
       than a fixed formula — see "Module 3.1: effect-based marginal scoring" in
       `docs/architecture.md`.
-- [ ] **Module 4** — React + TypeScript + Tailwind frontend (Dashboard, My Account,
-      Build Optimizer, Upgrade Advisor, Settings).
+- [x] **Module 4 — Frontend**: React + TypeScript + Vite + Tailwind app with routing for
+      all five planned pages. **My Account** (create/switch accounts, manage every
+      ownership type and chapter progress) and **Build Optimizer** (calls the Skill
+      Advisor for a real recommendation) are fully functional against the live API —
+      no mock data. **Dashboard**, **Upgrade Advisor**, and **Settings** are honest
+      placeholders until their backend advisors/endpoints exist. See
+      `frontend/README.md` and "Frontend architecture" in `docs/architecture.md`.
 - [ ] **Module 5** — Real game data seeding (see "Game data" below).
 
 ## Project layout
 
 ```
 backend/    FastAPI application, SQLAlchemy models, Alembic migrations
-frontend/   React + TypeScript + Vite + Tailwind app (scaffolding lands in Module 4)
+frontend/   React + TypeScript + Vite + Tailwind app
 database/   SQLite database file lives here in development; seed data scripts
 docs/       Architecture, installation, and development documentation
 tests/      Backend test suite (pytest)
