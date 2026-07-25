@@ -4,7 +4,7 @@ export function DashboardPage() {
   return (
     <PlaceholderPage
       title="Dashboard"
-      reason="An account score summary needs a scoring model across the whole build, not just skills. That lands once a Gear/Upgrade/Resource Advisor exists on the backend."
+      reason="A one-page account overview combining Gear, Upgrade, and Farm Advisor into a single score summary isn't built yet — each advisor has its own page (Build Optimizer, Gear Advisor, Upgrade Advisor, Farm Advisor) for now."
     />
   )
 }

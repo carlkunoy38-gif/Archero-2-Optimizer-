@@ -580,17 +580,19 @@ naming conventions instead of new ones introduced for this module alone.
 
 ## Frontend architecture (Module 4)
 
-### Why My Account and Build Optimizer only, functionally
+### Why some pages are placeholders and others aren't
 
-The frontend (`frontend/`, React + TypeScript + Vite + Tailwind) has routes for all five
-pages from the original spec, but only **My Account** and **Build Optimizer** call real
-endpoints. **Dashboard**, **Upgrade Advisor**, and **Settings** render a shared
-`PlaceholderPage` explaining what backend piece is missing (an account-wide scoring
-model; a Gear/Upgrade/Resource Advisor; a weights read/write endpoint) instead of
-displaying invented numbers. This mirrors the project's core rule for the backend's own
-`GAME DATA PLACEHOLDER` values — never present a placeholder as if it were real data —
-applied to the frontend: a page that *looks* functional but returns fabricated numbers
-would be worse than an honest "not built yet" screen, since a player could act on it.
+The frontend (`frontend/`, React + TypeScript + Vite + Tailwind) has routes for every
+advisor the backend exposes, plus **Dashboard** and **Settings**. A page either calls a
+real endpoint or renders the shared `PlaceholderPage` explaining what backend piece is
+missing — never invented numbers. This mirrors the project's core rule for the
+backend's own `GAME DATA PLACEHOLDER` values — never present a placeholder as if it
+were real data — applied to the frontend: a page that *looks* functional but returns
+fabricated numbers would be worse than an honest "not built yet" screen, since a player
+could act on it. As of Module 6, **My Account**, **Build Optimizer**, **Gear
+Advisor**, **Upgrade Advisor**, and **Farm Advisor** are all functional; only
+**Dashboard** (a combined account-score summary across all advisors, not built) and
+**Settings** (no weights read/write endpoint) remain placeholders.
 
 ### No client-side data model beyond the API's own shapes
 
@@ -636,6 +638,30 @@ afterward rather than patching local state optimistically — equip actions can 
 change *other* rows (clear-then-set replaces whatever was previously equipped), so the
 only way to stay correct is to ask the server what's true now, the same reason the
 backend's own equip endpoints return the full updated resource rather than a diff.
+
+### Gear, Upgrade, and Farm Advisor pages (Module 6)
+
+`GearAdvisorPage`, `UpgradeAdvisorPage`, and `FarmAdvisorPage` follow `BuildOptimizer
+Page`'s exact pattern: pick objective (and category/armor-slot for Gear Advisor) from
+the account's real data, call the matching `POST /optimizer/*/advise` endpoint, render
+the ranked result with each option's `summary`/`reasons`. None of them need a
+client-submitted candidate list the way Skill Advisor's skill picker does — the
+backend already scores every owned item/upgrade/chapter itself — so these pages are
+actually simpler than Build Optimizer's, just a couple of selects and a button.
+
+**A real bug found via manual testing, not caught by the mocked-API unit tests
+first written**: `UpgradeAdvisorPage`'s ranking spans every ownable category (hero,
+weapon, armor, ring, amulet, pet, rune) in one response, and `catalog_id` is only
+unique *within* a category — a `Hero` row and a `Weapon` row can both be catalog id 1.
+The first implementation matched "is this the recommended one" by comparing
+`scored.catalog_id === result.recommended_catalog_id`, which — verified against a live
+backend in a browser, not just the mocked unit tests — badged *two* rows
+"Recommended" whenever a hero and a weapon happened to share an id. Fixed by matching
+on ranking position (`index === 0`) instead, since the backend always returns the
+recommended option first; `GearAdvisorPage` doesn't have this problem since one
+request's ranking is always scoped to a single category. A regression test
+(`UpgradeAdvisorPage.test.tsx`) constructs exactly this same-id-different-category
+scenario so this can't silently regress.
 
 ### What's not decided yet
 

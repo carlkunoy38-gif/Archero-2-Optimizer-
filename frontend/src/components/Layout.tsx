@@ -4,7 +4,9 @@ const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/account', label: 'My Account' },
   { to: '/build-optimizer', label: 'Build Optimizer' },
+  { to: '/gear-advisor', label: 'Gear Advisor' },
   { to: '/upgrade-advisor', label: 'Upgrade Advisor' },
+  { to: '/farm-advisor', label: 'Farm Advisor' },
   { to: '/settings', label: 'Settings' },
 ]
 

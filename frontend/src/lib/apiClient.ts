@@ -13,9 +13,13 @@ import type {
   AmuletRead,
   ArmorOwnershipRead,
   ArmorRead,
+  ChapterAdviceRequest,
+  ChapterAdviceResponse,
   ChapterProgressRead,
   ChapterRead,
   ErrorEnvelope,
+  GearAdviceRequest,
+  GearAdviceResponse,
   HeroOwnershipRead,
   HeroRead,
   PetOwnershipRead,
@@ -28,6 +32,8 @@ import type {
   SkillAdviceResponse,
   SkillRead,
   SkillSelectionRead,
+  UpgradeAdviceRequest,
+  UpgradeAdviceResponse,
   WeaponOwnershipRead,
   WeaponRead,
 } from './types'
@@ -219,4 +225,10 @@ export const api = {
   // --- Optimizer ---
   adviseSkills: (payload: SkillAdviceRequest) =>
     post<SkillAdviceResponse>('/optimizer/skills/advise', payload),
+  adviseGear: (payload: GearAdviceRequest) =>
+    post<GearAdviceResponse>('/optimizer/gear/advise', payload),
+  adviseUpgrade: (payload: UpgradeAdviceRequest) =>
+    post<UpgradeAdviceResponse>('/optimizer/upgrade/advise', payload),
+  adviseChapters: (payload: ChapterAdviceRequest) =>
+    post<ChapterAdviceResponse>('/optimizer/chapters/advise', payload),
 }

@@ -1,21 +1,29 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/apiClient'
-import type { ObjectiveName, UpgradeAdviceResponse } from '../lib/types'
+import type { ChapterAdviceResponse, ObjectiveName } from '../lib/types'
 import { useCurrentAccount } from '../hooks/useCurrentAccount'
 import { Badge, Button, ErrorText, Panel, Select } from '../components/ui'
 
 const OBJECTIVES: { value: ObjectiveName; label: string; hint: string }[] = [
-  { value: 'balanced', label: 'Balanced', hint: 'A general-purpose blend of every dimension.' },
-  { value: 'boss', label: 'Boss fight', hint: 'Weighs single-target damage output most.' },
-  { value: 'farm', label: 'Farming', hint: 'Weighs clearing multiple enemies and resource gain most.' },
-  { value: 'survival', label: 'Survival', hint: "Weighs your build's survivability most." },
+  {
+    value: 'farm',
+    label: 'Farm (repeatable)',
+    hint: 'Ranks chapters by safe, energy-efficient repeatability — the best chapter to grind.',
+  },
+  {
+    value: 'balanced',
+    label: 'Progression',
+    hint: 'Ranks chapters by the furthest one still safely reachable — the best chapter to push into next.',
+  },
+  { value: 'boss', label: 'Progression (boss-weighted)', hint: 'Progression mode, weighted for single-target power.' },
+  { value: 'survival', label: 'Progression (survival-weighted)', hint: 'Progression mode, weighted for survivability.' },
 ]
 
-export function UpgradeAdvisorPage() {
+export function FarmAdvisorPage() {
   const { accountId } = useCurrentAccount()
-  const [objective, setObjective] = useState<ObjectiveName>('balanced')
-  const [result, setResult] = useState<UpgradeAdviceResponse | null>(null)
+  const [objective, setObjective] = useState<ObjectiveName>('farm')
+  const [result, setResult] = useState<ChapterAdviceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -25,7 +33,7 @@ export function UpgradeAdvisorPage() {
     setError(null)
     setResult(null)
     try {
-      const response = await api.adviseUpgrade({ account_id: accountId, objective })
+      const response = await api.adviseChapters({ account_id: accountId, objective })
       setResult(response)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -42,8 +50,8 @@ export function UpgradeAdvisorPage() {
           <Link to="/account" className="text-violet-400 underline">
             My Account
           </Link>{' '}
-          to create or switch to one first — the Upgrade Advisor spends this account's
-          actual gold.
+          to create or switch to one first — the Farm Advisor scores chapters against this
+          account's actual combat power.
         </p>
       </Panel>
     )
@@ -51,21 +59,21 @@ export function UpgradeAdvisorPage() {
 
   return (
     <div className="space-y-6">
-      <Panel title="Upgrade Advisor">
+      <Panel title="Farm / Chapter Advisor">
         <p className="mb-4 text-sm text-slate-400">
-          Checks every hero/weapon/armor/ring/amulet/pet/rune account #{accountId} owns and
-          finds the single best investment of its current gold — an upgrade that wouldn't
-          actually improve the build is never recommended.
+          Recommends the best chapter to farm repeatedly, or the best chapter to push into next
+          &mdash; and if account #{accountId} is under-powered for its next chapter, the best
+          upgrade to make first.
         </p>
 
         {error && <ErrorText>{error}</ErrorText>}
 
         <div className="mb-4">
-          <label htmlFor="upgrade-objective" className="mb-1 block text-xs font-medium text-slate-400">
-            Objective
+          <label htmlFor="farm-mode" className="mb-1 block text-xs font-medium text-slate-400">
+            Mode
           </label>
           <Select
-            id="upgrade-objective"
+            id="farm-mode"
             value={objective}
             onChange={(e) => setObjective(e.target.value as ObjectiveName)}
           >
@@ -90,20 +98,15 @@ export function UpgradeAdvisorPage() {
   )
 }
 
-function ResultPanel({ result }: { result: UpgradeAdviceResponse }) {
+function ResultPanel({ result }: { result: ChapterAdviceResponse }) {
   return (
     <Panel title="Recommendation">
       <div className="space-y-3">
         {result.ranking.map((scored, index) => {
-          // catalog_id is only unique *within* a category (hero id 1 and
-          // weapon id 1 are different rows) — ranking[0] is always the
-          // recommended one since the backend returns it pre-sorted, so
-          // position is the only always-correct way to tell, unlike Gear
-          // Advisor's single-category ranking where catalog_id alone works.
-          const isRecommended = index === 0
+          const isRecommended = scored.chapter_id === result.recommended_chapter_id
           return (
             <div
-              key={`${scored.category}-${scored.catalog_id}`}
+              key={scored.chapter_id}
               className={`rounded-md border p-3 ${
                 isRecommended ? 'border-emerald-600 bg-emerald-950/40' : 'border-slate-800 bg-slate-950/40'
               }`}
@@ -111,21 +114,15 @@ function ResultPanel({ result }: { result: UpgradeAdviceResponse }) {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-slate-100">
-                    #{index + 1} {scored.name}
+                    #{index + 1} Chapter {scored.number}: {scored.name}
                   </span>
-                  <Badge>{scored.category}</Badge>
                   {isRecommended && <Badge tone="positive">Recommended</Badge>}
                 </div>
                 <span className="text-sm font-mono text-slate-400">
-                  {scored.score >= 0 ? '+' : ''}
-                  {scored.score.toFixed(1)}%
+                  score {scored.score.toFixed(1)}
                 </span>
               </div>
               <p className="mt-1 text-sm text-slate-300">{scored.summary}</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Level {scored.from_level} &rarr; {scored.to_level} for {scored.gold_cost.toFixed(0)}{' '}
-                gold
-              </p>
               <details className="mt-2">
                 <summary className="cursor-pointer text-xs text-slate-500">Why (details)</summary>
                 <ul className="mt-1 list-inside list-disc text-xs text-slate-400">

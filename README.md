@@ -42,8 +42,9 @@ This repository is being built module by module. Completed so far:
       ownership type and chapter progress) and **Build Optimizer** (calls the Skill
       Advisor for a real recommendation) are fully functional against the live API —
       no mock data. **Dashboard**, **Upgrade Advisor**, and **Settings** are honest
-      placeholders until their backend advisors/endpoints exist. See
-      `frontend/README.md` and "Frontend architecture" in `docs/architecture.md`.
+      placeholders until their backend advisors/endpoints exist (Upgrade Advisor's own
+      page became functional in Module 6, below). See `frontend/README.md` and
+      "Frontend architecture" in `docs/architecture.md`.
 - [x] **Module 5 — Remaining Advisors**: Gear, Upgrade, and Chapter Advisors, built on
       the same Optimizer Engine as Skill Advisor — no new decision engine, no static
       tier lists. **Gear Advisor** (`POST /optimizer/gear/advise`) ranks an account's
@@ -70,8 +71,18 @@ This repository is being built module by module. Completed so far:
       Ice/Poison/Lightning/Fire investment actually affects every advisor's ranking,
       weighted highest under the `farm` objective. See "Module 6: real rune data..."
       in `docs/architecture.md`.
+- [x] **Module 6 (partial) — Gear/Upgrade/Farm Advisor frontend pages**: three new
+      functional pages calling the Module 5 endpoints — `GearAdvisorPage`,
+      `UpgradeAdvisorPage` (replacing its placeholder), and `FarmAdvisorPage` (new nav
+      item, for Chapter Advisor). Manual browser testing against a live backend caught
+      a real bug the mocked-API unit tests missed: Upgrade Advisor's ranking spans
+      every ownable category, and `catalog_id` is only unique *within* one category, so
+      matching "recommended" by id alone double-badged a hero and a weapon that
+      happened to share an id — fixed to match by ranking position instead, with a
+      regression test locking it down. See "Gear, Upgrade, and Farm Advisor pages
+      (Module 6)" in `docs/architecture.md`.
 - [ ] **Module 6 (remaining)** — real data for the other eight catalog entities (see
-      "Game data" below), and frontend pages for the three Module 5 advisors.
+      "Game data" below), and a combined Dashboard summarizing all advisors at once.
 
 ## Project layout
 

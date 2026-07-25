@@ -126,11 +126,9 @@ npm run build       # type-check + production build
 
 ### What's actually functional
 
-**My Account** and **Build Optimizer** call the real API — create/switch an account,
-manage every ownership type, and get a real Skill Advisor recommendation. **Dashboard**,
-**Upgrade Advisor**, and **Settings** are placeholders that explain why they're not built
-yet — for Dashboard and Settings, their backend endpoints don't exist; Upgrade Advisor's
-backend endpoint exists as of Module 5 (`POST /optimizer/upgrade/advise`, see "Module 5:
-Gear, Upgrade, and Chapter Advisors" in `docs/architecture.md`) but no frontend page
-calls it yet — rather than showing fake data, see "Frontend architecture" in
-`docs/architecture.md`.
+**My Account**, **Build Optimizer**, **Gear Advisor**, **Upgrade Advisor**, and **Farm
+Advisor** all call the real API — create/switch an account, manage every ownership
+type, and get real Skill/Gear/Upgrade/Chapter Advisor recommendations. **Dashboard**
+and **Settings** are placeholders that explain why they're not built yet — a combined
+account-score summary and a weights read/write endpoint, respectively — rather than
+showing fake data. See "Frontend architecture" in `docs/architecture.md`.

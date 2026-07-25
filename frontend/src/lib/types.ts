@@ -35,6 +35,14 @@ export type EffectType =
   | 'movement_speed_bonus'
   | 'resource_gain_bonus'
   | 'life_steal_bonus'
+  | 'attack_bonus'
+  | 'circle_damage_bonus'
+  | 'sprite_damage_bonus'
+  | 'plant_damage_bonus'
+  | 'ice_damage_bonus'
+  | 'poison_damage_bonus'
+  | 'lightning_damage_bonus'
+  | 'fire_damage_bonus'
 
 // --- Catalog (read-only) -----------------------------------------------
 
@@ -104,13 +112,18 @@ export interface PetRead {
   description: string | null
 }
 
+export interface RuneEffectRead {
+  effect_type: EffectType
+  value: number
+}
+
 export interface RuneRead {
   id: number
   name: string
   rune_type: RuneType
   rarity: Rarity
   effect_description: string | null
-  effect_value: number
+  effects: RuneEffectRead[]
 }
 
 export interface SkillEffectRead {
@@ -272,6 +285,73 @@ export interface SkillScoreBreakdown {
 export interface SkillAdviceResponse {
   recommended_skill_id: number
   ranking: SkillScoreBreakdown[]
+}
+
+export type GearCategory = 'weapon' | 'armor' | 'ring' | 'amulet' | 'pet'
+
+export interface GearAdviceRequest {
+  account_id: number
+  category: GearCategory
+  armor_slot?: ArmorSlot | null
+  objective?: ObjectiveName
+}
+
+export interface GearScoreBreakdown {
+  category: GearCategory
+  catalog_id: number
+  name: string
+  is_currently_equipped: boolean
+  score: number
+  summary: string
+  reasons: string[]
+}
+
+export interface GearAdviceResponse {
+  recommended_catalog_id: number
+  ranking: GearScoreBreakdown[]
+}
+
+export type UpgradeCategory = 'hero' | 'weapon' | 'armor' | 'ring' | 'amulet' | 'pet' | 'rune'
+
+export interface UpgradeAdviceRequest {
+  account_id: number
+  objective?: ObjectiveName
+}
+
+export interface UpgradeScoreBreakdown {
+  category: UpgradeCategory
+  catalog_id: number
+  name: string
+  from_level: number
+  to_level: number
+  gold_cost: number
+  score: number
+  summary: string
+  reasons: string[]
+}
+
+export interface UpgradeAdviceResponse {
+  recommended_catalog_id: number
+  ranking: UpgradeScoreBreakdown[]
+}
+
+export interface ChapterAdviceRequest {
+  account_id: number
+  objective?: ObjectiveName
+}
+
+export interface ChapterScoreBreakdown {
+  chapter_id: number
+  number: number
+  name: string
+  score: number
+  summary: string
+  reasons: string[]
+}
+
+export interface ChapterAdviceResponse {
+  recommended_chapter_id: number
+  ranking: ChapterScoreBreakdown[]
 }
 
 // --- Error envelope ---------------------------------------------------

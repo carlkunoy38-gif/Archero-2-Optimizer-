@@ -6,14 +6,16 @@ See `docs/installation.md` ("Frontend setup") for how to run it, and
 
 ## Status
 
-- **My Account** and **Build Optimizer** are fully functional against the real backend
-  API — no mock data. My Account can create/switch accounts and manage every ownership
-  type (heroes, weapons, armor, rings, amulets, pets, runes, skills) plus chapter
-  progress; Build Optimizer calls the Skill Advisor (`POST /optimizer/skills/advise`)
-  for a real, build-dependent recommendation.
-- **Dashboard**, **Upgrade Advisor**, and **Settings** are honest placeholders — they
-  say why they're not built yet (the backend advisors/endpoints they'd need don't exist
-  yet) rather than faking data or a working feature.
+- **My Account**, **Build Optimizer**, **Gear Advisor**, **Upgrade Advisor**, and **Farm
+  Advisor** are fully functional against the real backend API — no mock data. My Account
+  can create/switch accounts and manage every ownership type (heroes, weapons, armor,
+  rings, amulets, pets, runes, skills) plus chapter progress; Build Optimizer calls the
+  Skill Advisor; Gear Advisor ranks owned items in a category; Upgrade Advisor finds the
+  single best investment of current gold; Farm Advisor recommends the best chapter to
+  farm or push into next.
+- **Dashboard** and **Settings** are honest placeholders — they say why they're not
+  built yet (a combined account-score summary; a weights read/write endpoint) rather
+  than faking data or a working feature.
 
 ## Scripts
 
