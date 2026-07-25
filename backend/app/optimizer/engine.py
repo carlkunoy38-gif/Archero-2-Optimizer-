@@ -79,3 +79,32 @@ def aoe_score(context: BuildContext) -> float:
         math.sqrt(extra_projectiles) * weights.PROJECTILE_AOE_FACTOR
         + math.sqrt(bounce_count) * weights.BOUNCE_AOE_FACTOR
     )
+
+
+def summon_score(context: BuildContext) -> float:
+    """Damage output from rune-granted summons/elemental procs (Circle,
+    Sprite, Plant, Ice, Poison, Lightning, Fire — see "Module 6" in
+    docs/architecture.md for where these `BuildContext` fields came
+    from). A build that never invests in any of them scores 0 here
+    regardless of how strong its main weapon is; a build that stacks
+    several benefits from all of them at once, unlike `aoe_score`'s
+    single projectile/bounce mechanic.
+
+    A plain sum, not scaled by `attack` or by `sqrt` like `aoe_score`:
+    there is no real-game data yet on whether these procs scale off the
+    hero's own attack or are self-contained flat damage, so summing the
+    flat bonuses directly is the simplest model that doesn't assume an
+    interaction the game data doesn't confirm — see `ObjectiveProfile`'s
+    `summon_weight` for how this is scaled relative to the other
+    dimensions instead.
+    """
+
+    return (
+        context.circle_damage
+        + context.sprite_damage
+        + context.plant_damage
+        + context.ice_damage
+        + context.poison_damage
+        + context.lightning_damage
+        + context.fire_damage
+    )

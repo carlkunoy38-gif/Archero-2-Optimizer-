@@ -44,16 +44,52 @@ BOUNCE_AOE_FACTOR = 0.025
 
 # --- Objective profiles (app/optimizer/objectives.py) -----------------------
 
-#: Per-objective weighting of the four `engine.py` scores plus
-#: `aoe_score`, keyed by profile name. What "good" means depends on what
-#: the player is actually trying to do right now: a boss fight rewards
-#: single-target `offense_score` over `aoe_score`; farming is the
-#: opposite. `objectives.py` turns each row into an `ObjectiveProfile`.
+#: Per-objective weighting of the five `engine.py` scores (offense,
+#: defense, mobility, utility, aoe) plus `summon_score`, keyed by profile
+#: name. What "good" means depends on what the player is actually trying
+#: to do right now: a boss fight rewards single-target `offense_score`
+#: over `aoe_score`/`summon_score`; farming is the opposite.
+#: `objectives.py` turns each row into an `ObjectiveProfile`.
+#:
+#: `summon`'s weights are noticeably larger numbers than `aoe`'s despite
+#: following the same relative ordering (farm highest, boss lowest) —
+#: `summon_score` is a flat sum of small per-effect values (tens to
+#: low hundreds for a heavily-invested account, see `app/seeds/runes.py`)
+#: rather than `aoe_score`'s attack-scaled formula, so it needs a larger
+#: coefficient to matter at a comparable scale to the other terms.
 OBJECTIVE_WEIGHTS: dict[str, dict[str, float]] = {
-    "balanced": {"offense": 0.02, "defense": 0.05, "mobility": 40.0, "utility": 1.5, "aoe": 0.02},
-    "boss": {"offense": 0.04, "defense": 0.05, "mobility": 30.0, "utility": 0.5, "aoe": 0.005},
-    "farm": {"offense": 0.005, "defense": 0.02, "mobility": 20.0, "utility": 3.0, "aoe": 0.08},
-    "survival": {"offense": 0.01, "defense": 0.12, "mobility": 60.0, "utility": 1.0, "aoe": 0.01},
+    "balanced": {
+        "offense": 0.02,
+        "defense": 0.05,
+        "mobility": 40.0,
+        "utility": 1.5,
+        "aoe": 0.02,
+        "summon": 1.0,
+    },
+    "boss": {
+        "offense": 0.04,
+        "defense": 0.05,
+        "mobility": 30.0,
+        "utility": 0.5,
+        "aoe": 0.005,
+        "summon": 0.3,
+    },
+    "farm": {
+        "offense": 0.005,
+        "defense": 0.02,
+        "mobility": 20.0,
+        "utility": 3.0,
+        "aoe": 0.08,
+        "summon": 3.0,
+    },
+    "survival": {
+        "offense": 0.01,
+        "defense": 0.12,
+        "mobility": 60.0,
+        "utility": 1.0,
+        "aoe": 0.01,
+        "summon": 0.5,
+    },
 }
 
 #: Extra fractional weight `mobility_score` gets in any objective when

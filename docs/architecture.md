@@ -921,17 +921,36 @@ match.
 it after a schema change or alongside a future seed script never duplicates or
 silently overwrites a row that may have been hand-edited since.
 
-### What Module 6 deliberately still does not do
+### `summon_score`: the seven new fields, actually consumed
 
-The seven new per-summon-type damage fields are **plumbed through `BuildContext` and
-`build_context()` but not yet consumed by any advisor's scoring formula** —
-`engine.py`'s `offense_score`/`aoe_score`/etc. and every `ObjectiveProfile` still only
-read the pre-existing fields. Wiring "does this build's Circle/Plant/... investment
-matter for this objective" into the scoring formulas is real design work (which
-summons a Farm-oriented player actually leans on, how they should trade off against
-raw `attack`) that real gameplay data doesn't yet answer, so it's left for a future
-pass rather than guessed at now — the same "don't invent plausible-looking numbers"
-principle applied to a formula instead of a data value. Heroes, weapons, armor,
-rings, amulets, pets, skills, and chapters still have zero seeded rows — runes are the
-first catalog entity with real data, not the last one needed; see the root README's
-"Game data" section for what's still outstanding.
+The seven per-summon-type damage fields started out plumbed through `BuildContext`
+and `build_context()` but not read by any scoring formula. `engine.summon_score`
+closes that gap: a plain sum of `circle_damage`/`sprite_damage`/`plant_damage`/
+`ice_damage`/`poison_damage`/`lightning_damage`/`fire_damage`, added to
+`ObjectiveProfile.evaluate` alongside the existing four scores (`offense`, `defense`,
+`mobility`, `utility`) and `aoe_score`, via a new `summon_weight` field and a
+`"summon"` column in `weights.OBJECTIVE_WEIGHTS` (highest for `farm`, lowest for
+`boss` — the same relative ordering `aoe_weight` already follows, since a summon
+build's whole point is "handle many enemies at once," which farming rewards and a
+boss fight mostly doesn't).
+
+Deliberately a plain sum, not scaled by `attack` or `sqrt(...)` the way `aoe_score`
+is: there's no real-game data yet on whether these procs scale off the hero's own
+attack stat or are self-contained flat damage, so summing the flat bonuses directly
+is the simplest model that doesn't assume an interaction the game data doesn't
+confirm. Because `summon_score`'s raw magnitude is much smaller than `aoe_score`'s
+attack-scaled one (tens to low hundreds for a heavily-invested account — see
+`app/seeds/runes.py` — versus attack times a factor), `summon`'s weight coefficients
+in `weights.py` are correspondingly larger numbers than `aoe`'s, not because summons
+matter proportionally more, but so the term contributes at a comparable scale to the
+others in the weighted sum at all.
+
+### What's still not decided (Module 6)
+
+Wiring the *individual* summon types against each other (does a Circle build actually
+out-clear a Plant build for farming, and by how much) would need real gameplay data
+this project doesn't have — `summon_score` treats all seven types as interchangeable
+for now, which is honest given what's known, not a claim that they play identically.
+Heroes, weapons, armor, rings, amulets, pets, skills, and chapters still have zero
+seeded rows — runes are the first catalog entity with real data, not the last one
+needed; see the root README's "Game data" section for what's still outstanding.

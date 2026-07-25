@@ -106,3 +106,31 @@ def test_aoe_score_weighs_projectiles_and_bounces_differently() -> None:
     assert from_projectile != from_bounce
     assert from_projectile > 0.0
     assert from_bounce > 0.0
+
+
+def test_summon_score_is_zero_with_no_summon_investment() -> None:
+    assert engine.summon_score(_context(attack=500.0)) == 0.0
+
+
+def test_summon_score_sums_every_summon_damage_field() -> None:
+    context = _context(
+        circle_damage=30.0,
+        sprite_damage=15.0,
+        plant_damage=15.0,
+        ice_damage=10.0,
+        poison_damage=20.0,
+        lightning_damage=10.0,
+        fire_damage=20.0,
+    )
+
+    assert engine.summon_score(context) == 120.0
+
+
+def test_summon_score_is_independent_of_attack() -> None:
+    # A build that never invests in summons gets nothing here no matter
+    # how strong its main weapon is, unlike offense_score/aoe_score.
+    with_summon = engine.summon_score(_context(attack=100.0, circle_damage=30.0))
+    stronger_weapon_no_summon = engine.summon_score(_context(attack=99999.0))
+
+    assert with_summon == 30.0
+    assert stronger_weapon_no_summon == 0.0

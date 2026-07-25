@@ -65,10 +65,13 @@ This repository is being built module by module. Completed so far:
       dimensions yet — so `Rune` gained structured multi-effect rows (`RuneEffect`,
       mirroring how `SkillEffect` already works for skills) and `BuildContext` gained
       seven new fields, the same "extend, don't silently collapse" approach Module
-      3.1 established. See "Module 6: real rune data..." in `docs/architecture.md`.
+      3.1 established. The seven new fields are now consumed too — `engine.summon_score`
+      plus a new `ObjectiveProfile.summon_weight` mean a build's Circle/Sprite/Plant/
+      Ice/Poison/Lightning/Fire investment actually affects every advisor's ranking,
+      weighted highest under the `farm` objective. See "Module 6: real rune data..."
+      in `docs/architecture.md`.
 - [ ] **Module 6 (remaining)** — real data for the other eight catalog entities (see
-      "Game data" below), wiring the new per-summon-type fields into the scoring
-      formulas, and frontend pages for the three Module 5 advisors.
+      "Game data" below), and frontend pages for the three Module 5 advisors.
 
 ## Project layout
 

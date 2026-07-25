@@ -71,6 +71,25 @@ def test_evaluate_boosts_mobility_weight_when_underpowered() -> None:
     assert objectives.BALANCED.evaluate(underpowered) > objectives.BALANCED.evaluate(on_pace)
 
 
+def test_farm_weighs_summon_investment_more_than_boss_does() -> None:
+    summon_build = _context(circle_damage=30.0, plant_damage=15.0)
+
+    boss_score = objectives.BOSS.evaluate(summon_build)
+    farm_score = objectives.FARM.evaluate(summon_build)
+
+    # Same summon investment, different objective weighting — farming
+    # should value it more than a boss fight does (see
+    # weights.OBJECTIVE_WEIGHTS's "summon" column).
+    assert farm_score > boss_score
+
+
+def test_evaluate_rewards_summon_investment_over_an_identical_build_without_it() -> None:
+    no_summons = _context(attack=100.0)
+    with_summons = _context(attack=100.0, fire_damage=20.0, poison_damage=20.0)
+
+    assert objectives.FARM.evaluate(with_summons) > objectives.FARM.evaluate(no_summons)
+
+
 def test_resolve_returns_the_matching_profile() -> None:
     assert objectives.resolve("farm") is objectives.FARM
 

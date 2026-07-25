@@ -34,6 +34,7 @@ class ObjectiveProfile:
     mobility_weight: float
     utility_weight: float
     aoe_weight: float
+    summon_weight: float
 
     def evaluate(self, context: BuildContext) -> float:
         """A single scalar "how good is this build for this objective"
@@ -52,6 +53,7 @@ class ObjectiveProfile:
             + engine.mobility_score(context) * mobility_weight
             + engine.utility_score(context) * self.utility_weight
             + engine.aoe_score(context) * self.aoe_weight
+            + engine.summon_score(context) * self.summon_weight
         )
 
 
@@ -64,6 +66,7 @@ def _from_weights(name: str) -> ObjectiveProfile:
         mobility_weight=row["mobility"],
         utility_weight=row["utility"],
         aoe_weight=row["aoe"],
+        summon_weight=row["summon"],
     )
 
 
