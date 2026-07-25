@@ -21,6 +21,7 @@ from app.domain.models import (
     Pet,
     Ring,
     Rune,
+    RuneEffect,
     RuneType,
     Skill,
     SkillEffect,
@@ -193,11 +194,11 @@ def test_build_context_uses_active_pet_bonus_stat(
     assert context.dodge == 0.15
 
 
-def test_build_context_maps_rune_type_to_stat_field(
+def test_build_context_folds_in_equipped_rune_effects(
     db: Session, account: UserAccount, rune: Rune
 ) -> None:
     rune.rune_type = RuneType.UTILITY
-    rune.effect_value = 5.0
+    rune.effects = [RuneEffect(effect_type=EffectType.RESOURCE_GAIN_BONUS, value=5.0)]
     db.add(
         UserRuneOwnership(
             account_id=account.id,

@@ -21,8 +21,6 @@ design; the specific numbers are not claims about real game balance.
 
 from __future__ import annotations
 
-from app.domain.models.enums import RuneType
-
 # --- Build-context aggregation (app/optimizer/context.py) ------------------
 
 #: Fraction of a base stat added per level above 1 (simple linear
@@ -33,15 +31,6 @@ LEVEL_GROWTH_RATE = 0.08
 #: Fraction of a weapon/armor's base value added per star level, on top
 #: of the level multiplier.
 STAR_LEVEL_BONUS = 0.05
-
-#: Runes are tagged with a broad `RuneType` (offense/defense/utility),
-#: not a specific `StatType` the way rings/amulets are — this maps each
-#: category to the one `BuildContext` field it feeds into.
-RUNE_TYPE_STAT_FIELD: dict[RuneType, str] = {
-    RuneType.OFFENSE: "attack",
-    RuneType.DEFENSE: "defense",
-    RuneType.UTILITY: "resource_gain",
-}
 
 # --- Engine primitives (app/optimizer/engine.py) ---------------------------
 

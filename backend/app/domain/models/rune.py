@@ -1,6 +1,14 @@
 """Rune catalog model.
 
-GAME DATA PLACEHOLDER: effect values are illustrative.
+A rune's `rune_type` (offense/defense/utility) is a broad category kept
+for filtering (`GET /runes?rune_type=...`); the actual mechanical
+effects a rune grants live on `RuneEffect` rows (`effects`), not a
+single scalar column, since real runes grant several distinct effects
+at once — see `app/domain/models/rune_effect.py`.
+
+GAME DATA PLACEHOLDER: `rarity` values are illustrative; see
+`database/seeds/` for which runes have been seeded with real effect
+data sourced from the live game versus which remain placeholders.
 """
 
 from __future__ import annotations
@@ -15,11 +23,12 @@ from app.domain.models.enums import Rarity, RuneType
 from app.domain.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from app.domain.models.rune_effect import RuneEffect
     from app.domain.models.user_account import UserRuneOwnership
 
 
 class Rune(TimestampMixin, Base):
-    """A socketable rune that grants a passive effect."""
+    """A socketable rune that grants one or more passive effects."""
 
     __tablename__ = "runes"
 
@@ -28,11 +37,17 @@ class Rune(TimestampMixin, Base):
     rune_type: Mapped[RuneType] = mapped_column(Enum(RuneType, name="rune_type"))
     rarity: Mapped[Rarity] = mapped_column(Enum(Rarity, name="rarity_rune"))
 
+    #: Free-text summary of any qualitative ability the rune grants
+    #: beyond its numeric `effects` (e.g. "Links deal 10% ATK as Poison
+    #: DMG per second") — not fed into scoring, since there is no
+    #: numeric field for it yet; see `RuneEffect` for what is.
     effect_description: Mapped[str | None] = mapped_column(Text, default=None)
-    effect_value: Mapped[float] = mapped_column(default=0.0)
 
     owner_links: Mapped[list[UserRuneOwnership]] = relationship(
         back_populates="rune"
+    )
+    effects: Mapped[list[RuneEffect]] = relationship(
+        back_populates="rune", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid

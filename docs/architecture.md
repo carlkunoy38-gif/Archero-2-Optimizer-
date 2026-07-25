@@ -18,6 +18,9 @@ app/
   optimizer/     decision/recommendation engine (Module 3) — depends only on domain
                  (see "The Optimizer Engine (Module 3)" below for why this is its own
                  top-level package rather than living under services/)
+  seeds/         one-off real-game-data catalog seeding logic (Module 6) — depends
+                 only on domain; run via database/seeds/*.py CLI wrappers, never by
+                 the running API itself
   api/           FastAPI routers (api/router.py + api/routes/*.py,
                  api/error_handlers.py) — depends on services + schemas
 ```
@@ -824,3 +827,111 @@ The Gear/Upgrade/Chapter Advisor frontend pages don't exist yet — Module 4 onl
 up My Account and Build Optimizer against real endpoints, so Dashboard/Upgrade
 Advisor/Settings remain the honest placeholders described above until a future module
 gives them real pages to call these new endpoints from.
+
+## Module 6: real rune data, and the stat dimensions it revealed
+
+Every number in this project before Module 6 was an explicitly-labeled **GAME DATA
+PLACEHOLDER** — realistic-shaped, but not sourced from the real game (see the root
+README's "Game data" section). Module 6 is the first module to seed real data,
+sourced from screenshots of a live Archero 2 account's "Rune Workshop" and account
+stat "Details" screens. Real data immediately exposed a real gap: the live game
+tracks per-summon-type damage bonuses (Circle, Sprite, Plant, Ice, Poison, Lightning,
+Fire — one per rune-granted companion or elemental proc) and a flat "ATK PWR" /
+"Main Weapon DMG" bonus, none of which existed as `BuildContext` fields or
+`EffectType` members before this module. Rather than lossily mapping these onto the
+nearest existing field (which would have quietly collapsed a Circle-build and a
+Plant-build to the same "attack" number — precisely the kind of same-category
+collapse Module 3.1 already fixed once for skills), this module extends the model the
+same way Module 3.1 did: new structured effect types, new `BuildContext` fields, no
+new scoring formula.
+
+### `EffectType` gained eight members, `BuildContext` gained seven fields
+
+`ATTACK_BONUS`, `CIRCLE_DAMAGE_BONUS`, `SPRITE_DAMAGE_BONUS`, `PLANT_DAMAGE_BONUS`,
+`ICE_DAMAGE_BONUS`, `POISON_DAMAGE_BONUS`, `LIGHTNING_DAMAGE_BONUS`, and
+`FIRE_DAMAGE_BONUS` join `app/domain/models/enums.py::EffectType`, each mapped
+(`app/optimizer/context.py::_EFFECT_TYPE_FIELD`) to a `BuildContext` field —
+`ATTACK_BONUS` reuses the existing `attack` field (see "One simplification, stated
+plainly" below), the other seven are new: `circle_damage`, `sprite_damage`,
+`plant_damage`, `ice_damage`, `poison_damage`, `lightning_damage`, `fire_damage`, all
+defaulting to `0.0`. This is purely additive to the existing model — no existing
+field, formula, or advisor changed shape; a build that never invests in a Plant
+Guardian summon simply keeps `plant_damage == 0.0` and nothing downstream needs to
+know these fields exist at all yet (no advisor currently scores by them — see "What
+Module 6 deliberately still does not do" below).
+
+### `Rune` gained structured multi-effect rows, the same way `Skill` did in Module 3.1
+
+Before this module, `Rune` had a single `effect_value: float` column and an
+`effect_description` text field, implicitly assuming one rune grants one number.
+The real rune data immediately falsified that: a single rune (e.g. Vine Bind) grants
+*several* effects simultaneously (`PLANT_DAMAGE_BONUS`, twice, at different
+magnitudes, plus `ATTACK_BONUS`). `app/domain/models/rune_effect.py::RuneEffect` is a
+new table mirroring `SkillEffect` exactly (one row per effect, `ondelete="CASCADE"`
+from its rune, a `value >= 0` check) — the same "don't force one scalar column to
+represent N things" reasoning, applied to the second catalog entity that turned out
+to need it. `Rune.effect_value` is gone; `Rune.effects: list[RuneEffect]` replaces it,
+and `Rune.effect_description` stays as free text for qualitative abilities that don't
+reduce to a flat number (see "One simplification, stated plainly" below).
+
+One real difference from `SkillEffect`, not just a rename: **runes level up, skills
+don't.** `skill_effect_contribution(skill)` applies every effect at full value with
+no level parameter, because a skill choice has no level. `rune_effect_contribution(
+rune, level)` (`app/optimizer/context.py`) scales every effect by the same
+`_level_multiplier(level)` every other leveled contribution function
+(`hero_contribution`, `weapon_contribution`, ...) uses — genuinely different math for
+a genuinely different mechanic, not the same function copy-pasted.
+
+### One simplification, stated plainly: `ATTACK_BONUS` folds two real mechanics into one field
+
+The source data distinguishes "ATK PWR" (a rune stat that, per one rune's own
+description, other runes can *convert* percentages of — "Converts 15% ATK PWR to 20%
+Max HP") from "Main Weapon DMG" (which several rune descriptions separately call out
+as boosting only the auto-attack, not summons). This project's `BuildContext.attack`
+is a single flat number with no separate "power stat other things scale off of"
+concept and no multiplicative conversion mechanism — modeling that distinction
+correctly would mean rebuilding how `attack` is computed everywhere, not adding an
+enum member. `ATTACK_BONUS` therefore folds both into the existing `attack` field
+additively. This is a real, acknowledged simplification (documented on the
+`EffectType` enum itself), not a silent one — the alternative, inventing plausible-
+looking numbers for a mechanic this project doesn't model yet, is exactly the kind of
+thing the "never present a placeholder as real data" rule exists to rule out.
+Percentage-based effects in the source data ("Fire DMG +50%", "Main weapon DMG
++10%", stat-conversion abilities) are recorded as free text in `effect_description`
+for the same reason: `RuneEffect.value` is a flat additive number, and there is no
+percentage-modifier field to put a "+50%" into without misrepresenting it as flat.
+
+### `database/seeds/`: the first real seed data, and why the logic lives under `app/`
+
+`app/seeds/runes.py` (new top-level package, depends only on `domain`) holds the
+actual seed data and the idempotent `seed_runes(db)` function; `database/seeds/
+seed_runes.py` is a two-line CLI wrapper that just calls it. Splitting it this way —
+rather than putting everything in the `database/seeds/` script directly — means the
+seed data gets the project's normal ruff/mypy/pytest coverage (`tests/backend/
+test_seed_runes.py` verifies it inserts exactly the expected rows, is idempotent on a
+second run, and — the check that matters most — that summing each seeded rune's
+numeric effects by type reproduces the *account-level* aggregate totals shown in the
+same source screenshots exactly (e.g. every rune contributing `CIRCLE_DAMAGE_BONUS`
+sums to the account's displayed "Circle DMG +30"). That reconciliation is what turns
+this from "plausible-looking example data" into a verified transcription of a real
+account state, and it would fail loudly if a future edit to the seed data broke the
+match.
+
+`seed_runes` is intentionally **insert-if-missing by name**, not an upsert: re-running
+it after a schema change or alongside a future seed script never duplicates or
+silently overwrites a row that may have been hand-edited since.
+
+### What Module 6 deliberately still does not do
+
+The seven new per-summon-type damage fields are **plumbed through `BuildContext` and
+`build_context()` but not yet consumed by any advisor's scoring formula** —
+`engine.py`'s `offense_score`/`aoe_score`/etc. and every `ObjectiveProfile` still only
+read the pre-existing fields. Wiring "does this build's Circle/Plant/... investment
+matter for this objective" into the scoring formulas is real design work (which
+summons a Farm-oriented player actually leans on, how they should trade off against
+raw `attack`) that real gameplay data doesn't yet answer, so it's left for a future
+pass rather than guessed at now — the same "don't invent plausible-looking numbers"
+principle applied to a formula instead of a data value. Heroes, weapons, armor,
+rings, amulets, pets, skills, and chapters still have zero seeded rows — runes are the
+first catalog entity with real data, not the last one needed; see the root README's
+"Game data" section for what's still outstanding.

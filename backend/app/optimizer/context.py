@@ -22,7 +22,7 @@ from app.domain.models import (
     Armor,
     EffectType,
     Hero,
-    RuneType,
+    Rune,
     Skill,
     StatType,
     UserAccount,
@@ -67,6 +67,14 @@ _EFFECT_TYPE_FIELD: dict[EffectType, str] = {
     EffectType.MOVEMENT_SPEED_BONUS: "movement_speed",
     EffectType.RESOURCE_GAIN_BONUS: "resource_gain",
     EffectType.LIFE_STEAL_BONUS: "life_steal",
+    EffectType.ATTACK_BONUS: "attack",
+    EffectType.CIRCLE_DAMAGE_BONUS: "circle_damage",
+    EffectType.SPRITE_DAMAGE_BONUS: "sprite_damage",
+    EffectType.PLANT_DAMAGE_BONUS: "plant_damage",
+    EffectType.ICE_DAMAGE_BONUS: "ice_damage",
+    EffectType.POISON_DAMAGE_BONUS: "poison_damage",
+    EffectType.LIGHTNING_DAMAGE_BONUS: "lightning_damage",
+    EffectType.FIRE_DAMAGE_BONUS: "fire_damage",
 }
 
 
@@ -115,6 +123,22 @@ class BuildContext:
     #: what's already selected (e.g. "you already have two projectile
     #: skills, so a third is worth less"), not for scoring math itself.
     selected_skill_ids: frozenset[int] = field(default_factory=frozenset)
+
+    #: Per-summon/elemental-proc damage bonuses, granted almost entirely
+    #: by runes (a Circle rune buffs `circle_damage`, a Vine Bind rune
+    #: buffs `plant_damage`, ...) — distinct from `attack` because a
+    #: build that never summons a Plant Guardian gets zero value from
+    #: `plant_damage` no matter how high it is, the same reason
+    #: `projectile_count`/`bounce_count` are tracked separately from
+    #: `attack` rather than folded into it. All default to `0.0`: most
+    #: builds invest in only one or two of these at a time.
+    circle_damage: float = 0.0
+    sprite_damage: float = 0.0
+    plant_damage: float = 0.0
+    ice_damage: float = 0.0
+    poison_damage: float = 0.0
+    lightning_damage: float = 0.0
+    fire_damage: float = 0.0
 
     @property
     def power_gap_ratio(self) -> float:
@@ -192,11 +216,22 @@ def stat_item_contribution(stat_type: StatType, value: float, level: int) -> dic
     return {stat_field: value * _level_multiplier(level)}
 
 
-def rune_contribution(rune_type: RuneType, effect_value: float, level: int) -> dict[str, float]:
-    stat_field = weights.RUNE_TYPE_STAT_FIELD.get(rune_type)
-    if stat_field is None:
-        return {}
-    return {stat_field: effect_value * _level_multiplier(level)}
+def rune_effect_contribution(rune: Rune, level: int) -> dict[str, float]:
+    """Every `RuneEffect` on the row, scaled by the rune's current level —
+    unlike `skill_effect_contribution`, runes *do* level up, so (unlike
+    skills) the level factor applies here. Used both for an account's
+    already-equipped runes (`build_context` below) and for a *candidate*
+    rune at a hypothetical level (the Upgrade Advisor, via
+    `app.optimizer.simulator.replace_contribution`)."""
+
+    factor = _level_multiplier(level)
+    totals: dict[str, float] = {}
+    for effect in rune.effects:
+        effect_field = _EFFECT_TYPE_FIELD.get(effect.effect_type)
+        if effect_field is None:
+            continue
+        totals[effect_field] = totals.get(effect_field, 0.0) + effect.value * factor
+    return totals
 
 
 def skill_effect_contribution(skill: Skill) -> dict[str, float]:
@@ -279,13 +314,7 @@ def build_context(account: UserAccount) -> BuildContext:
     for rune_ownership in account.runes:
         if not rune_ownership.is_equipped:
             continue
-        _add(
-            rune_contribution(
-                rune_ownership.rune.rune_type,
-                rune_ownership.rune.effect_value,
-                rune_ownership.level,
-            )
-        )
+        _add(rune_effect_contribution(rune_ownership.rune, rune_ownership.level))
 
     selected_skill_ids: set[int] = set()
     for selection in account.skill_selections:
@@ -318,4 +347,11 @@ def build_context(account: UserAccount) -> BuildContext:
         projectile_count=totals["projectile_count"],
         bounce_count=totals["bounce_count"],
         selected_skill_ids=frozenset(selected_skill_ids),
+        circle_damage=totals["circle_damage"],
+        sprite_damage=totals["sprite_damage"],
+        plant_damage=totals["plant_damage"],
+        ice_damage=totals["ice_damage"],
+        poison_damage=totals["poison_damage"],
+        lightning_damage=totals["lightning_damage"],
+        fire_damage=totals["fire_damage"],
     )

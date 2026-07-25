@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.domain.models import Rarity, Rune, RuneType
+from app.domain.models import EffectType, Rarity, Rune, RuneEffect, RuneType
 
 
 def test_list_runes_empty(client: TestClient) -> None:
@@ -59,3 +59,23 @@ def test_get_rune_detail(client: TestClient, rune: Rune) -> None:
 def test_get_rune_detail_missing_is_404(client: TestClient) -> None:
     response = client.get("/api/v1/runes/999999")
     assert response.status_code == 404
+
+
+def test_get_rune_detail_serializes_effects(client: TestClient, db: Session) -> None:
+    rune = Rune(name="Vine Bind", rune_type=RuneType.OFFENSE, rarity=Rarity.EPIC)
+    rune.effects = [
+        RuneEffect(effect_type=EffectType.PLANT_DAMAGE_BONUS, value=5.0),
+        RuneEffect(effect_type=EffectType.ATTACK_BONUS, value=50.0),
+    ]
+    db.add(rune)
+    db.commit()
+
+    response = client.get(f"/api/v1/runes/{rune.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["effect_description"] is None
+    assert {(e["effect_type"], e["value"]) for e in body["effects"]} == {
+        ("plant_damage_bonus", 5.0),
+        ("attack_bonus", 50.0),
+    }

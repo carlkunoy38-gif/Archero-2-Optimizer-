@@ -17,6 +17,8 @@ from app.domain.models import (
     Hero,
     HeroClass,
     Rarity,
+    Rune,
+    RuneEffect,
     RuneType,
     Skill,
     SkillEffect,
@@ -24,11 +26,10 @@ from app.domain.models import (
     StatType,
     Weapon,
 )
-from app.optimizer import weights
 from app.optimizer.context import (
     armor_contribution,
     hero_contribution,
-    rune_contribution,
+    rune_effect_contribution,
     skill_effect_contribution,
     stat_item_contribution,
     weapon_contribution,
@@ -95,9 +96,29 @@ def test_stat_item_contribution_scales_by_level() -> None:
     assert contribution == {"attack": 140.0}
 
 
-def test_rune_contribution_maps_rune_type_to_field() -> None:
-    contribution = rune_contribution(RuneType.UTILITY, 5.0, level=1)
-    assert contribution == {"resource_gain": 5.0}
+def test_rune_effect_contribution_sums_multiple_effects_and_scales_by_level() -> None:
+    rune = Rune(name="Vine Bind", rune_type=RuneType.OFFENSE, rarity=Rarity.EPIC)
+    rune.effects = [
+        RuneEffect(effect_type=EffectType.PLANT_DAMAGE_BONUS, value=5.0),
+        RuneEffect(effect_type=EffectType.PLANT_DAMAGE_BONUS, value=10.0),
+        RuneEffect(effect_type=EffectType.ATTACK_BONUS, value=50.0),
+    ]
+
+    # _level_multiplier(6) == 1 + 5 * 0.08 == 1.4 — unlike skills, runes
+    # level up, so (unlike skill_effect_contribution) this scales.
+    contribution = rune_effect_contribution(rune, level=6)
+
+    assert contribution == {
+        "plant_damage": pytest.approx(21.0),
+        "attack": pytest.approx(70.0),
+    }
+
+
+def test_rune_effect_contribution_is_empty_for_a_rune_with_no_effects() -> None:
+    rune = Rune(name="Empty", rune_type=RuneType.UTILITY, rarity=Rarity.COMMON)
+    rune.effects = []
+
+    assert rune_effect_contribution(rune, level=1) == {}
 
 
 def test_skill_effect_contribution_sums_multiple_effects_on_same_field() -> None:
@@ -117,10 +138,3 @@ def test_skill_effect_contribution_is_empty_for_a_skill_with_no_effects() -> Non
     skill.effects = []
 
     assert skill_effect_contribution(skill) == {}
-
-
-def test_every_rune_type_is_mapped_to_a_build_context_field() -> None:
-    # Documents the "silently ignore an unmapped type, don't raise"
-    # contract rune_contribution relies on: it's only safe because
-    # every current RuneType has an entry today.
-    assert set(RuneType) == set(weights.RUNE_TYPE_STAT_FIELD)

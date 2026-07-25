@@ -55,8 +55,20 @@ This repository is being built module by module. Completed so far:
       push into next, and — when the account is under-powered for it — the best
       upgrade to make first, by reusing the Upgrade Advisor directly. See "Module 5:
       Gear, Upgrade, and Chapter Advisors" in `docs/architecture.md`.
-- [ ] **Module 6** — Real game data seeding (see "Game data" below), and frontend pages
-      for the three new advisors.
+- [x] **Module 6 (partial) — Real rune data**: the first real (not placeholder) catalog
+      data in this project, sourced from live-account screenshots — 10 real runes
+      (Spin SPD Up, Sharp Arrow, Flamenox Seal, Vine Bind, Flamenox Touch, Circle,
+      Frostshock Touch, Melee Sprite, Resilience, Intelligence) with real numeric
+      effects, seeded via `database/seeds/seed_runes.py`. Real data revealed a real
+      gap — the live game tracks per-summon-type damage (Circle/Sprite/Plant/Ice/
+      Poison/Lightning/Fire) and a flat "ATK PWR" bonus that didn't exist as build
+      dimensions yet — so `Rune` gained structured multi-effect rows (`RuneEffect`,
+      mirroring how `SkillEffect` already works for skills) and `BuildContext` gained
+      seven new fields, the same "extend, don't silently collapse" approach Module
+      3.1 established. See "Module 6: real rune data..." in `docs/architecture.md`.
+- [ ] **Module 6 (remaining)** — real data for the other eight catalog entities (see
+      "Game data" below), wiring the new per-summon-type fields into the scoring
+      formulas, and frontend pages for the three Module 5 advisors.
 
 ## Project layout
 
@@ -74,13 +86,22 @@ See [`docs/architecture.md`](docs/architecture.md) for the design of the layers 
 
 ## Game data
 
-Archero 2's real hero stats, weapon damage tables, rune effects, etc. are not available
-to this project. Every catalog model is fully functional against **realistic placeholder
-data** — the schema, relationships, and scoring math all work end-to-end — but the actual
-numbers seeded into the database are illustrative, not datamined. Every file under
-`backend/app/domain/models/` that contains placeholder values says so explicitly in its
-module docstring. Real data can be added later purely as data (via `database/seeds/`),
-with no schema changes required.
+Archero 2's real hero stats, weapon damage tables, etc. mostly still aren't available to
+this project. Runes are the first exception: `database/seeds/seed_runes.py` seeds 10 real
+runes with real effect values, sourced from live-account screenshots (see "Module 6" in
+`docs/architecture.md`). Every other catalog model (heroes, weapons, armor, rings,
+amulets, pets, skills, chapters) is still fully functional against **realistic
+placeholder data** — the schema, relationships, and scoring math all work end-to-end —
+but the actual numbers seeded into the database for those entities remain illustrative,
+not datamined. Every file under `backend/app/domain/models/` that contains placeholder
+values says so explicitly in its module docstring.
+
+Real data can usually be added later purely as data (via `database/seeds/`), but not
+always with zero schema changes — seeding real rune data revealed the schema itself was
+too simple (one rune granting several effects at once needed `RuneEffect` rows, not a
+single scalar column), so "add real data" and "the schema might need to grow to hold it
+honestly" should both be expected for the remaining catalog entities, not just the
+former.
 
 ## License
 

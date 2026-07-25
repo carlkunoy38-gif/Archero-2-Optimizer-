@@ -101,6 +101,18 @@ class EffectType(enum.StrEnum):
 
     GAME DATA PLACEHOLDER: this is a realistic-shaped set of mechanical
     levers, not a transcription of Archero 2's actual skill effect data.
+
+    The eight members from ``ATTACK_BONUS`` onward were added once real
+    account/rune screenshots showed Archero 2 tracking flat "ATK PWR" /
+    "Main Weapon DMG" bonuses and per-summon-type damage (Circle, Sprite,
+    Plant, Ice, Poison, Lightning, Fire — one per rune-granted companion
+    or elemental proc) as genuinely distinct build dimensions, not a
+    single generic "attack" number. ``ATTACK_BONUS`` folds both "ATK PWR"
+    and "Main Weapon DMG" into the existing `attack` field, since this
+    project's build model treats attack additively rather than
+    replicating the real game's separate multiplicative ATK-PWR-vs-flat-
+    damage mechanics — a deliberate simplification, not a claim that
+    real Archero 2 treats them identically.
     """
 
     PROJECTILE_COUNT = "projectile_count"
@@ -114,3 +126,11 @@ class EffectType(enum.StrEnum):
     MOVEMENT_SPEED_BONUS = "movement_speed_bonus"
     RESOURCE_GAIN_BONUS = "resource_gain_bonus"
     LIFE_STEAL_BONUS = "life_steal_bonus"
+    ATTACK_BONUS = "attack_bonus"
+    CIRCLE_DAMAGE_BONUS = "circle_damage_bonus"
+    SPRITE_DAMAGE_BONUS = "sprite_damage_bonus"
+    PLANT_DAMAGE_BONUS = "plant_damage_bonus"
+    ICE_DAMAGE_BONUS = "ice_damage_bonus"
+    POISON_DAMAGE_BONUS = "poison_damage_bonus"
+    LIGHTNING_DAMAGE_BONUS = "lightning_damage_bonus"
+    FIRE_DAMAGE_BONUS = "fire_damage_bonus"

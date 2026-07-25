@@ -23,6 +23,7 @@ from app.domain.models.hero import Hero
 from app.domain.models.pet import Pet
 from app.domain.models.ring import Ring
 from app.domain.models.rune import Rune
+from app.domain.models.rune_effect import RuneEffect
 from app.domain.models.skill import Skill
 from app.domain.models.skill_effect import SkillEffect
 from app.domain.models.user_account import (
@@ -51,6 +52,7 @@ __all__ = [
     "Rarity",
     "Ring",
     "Rune",
+    "RuneEffect",
     "RuneType",
     "Skill",
     "SkillEffect",

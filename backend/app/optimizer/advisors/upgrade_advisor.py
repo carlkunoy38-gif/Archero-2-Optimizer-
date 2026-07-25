@@ -36,7 +36,7 @@ from app.optimizer.context import (
     armor_contribution,
     build_context,
     hero_contribution,
-    rune_contribution,
+    rune_effect_contribution,
     stat_item_contribution,
     weapon_contribution,
 )
@@ -114,7 +114,7 @@ def _pet_contribution_fn(pet: Pet) -> Callable[[int], dict[str, float]]:
 
 
 def _rune_contribution_fn(rune: Rune) -> Callable[[int], dict[str, float]]:
-    return lambda level: rune_contribution(rune.rune_type, rune.effect_value, level)
+    return lambda level: rune_effect_contribution(rune, level)
 
 
 def _affordable_candidate(

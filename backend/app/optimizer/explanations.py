@@ -32,6 +32,13 @@ FIELD_DESCRIPTION: dict[str, str] = {
     "resource_gain": "resource gain",
     "projectile_count": "projectile count",
     "bounce_count": "bounce/ricochet count",
+    "circle_damage": "circle (orbiting) damage",
+    "sprite_damage": "sprite summon damage",
+    "plant_damage": "plant guardian damage",
+    "ice_damage": "ice proc damage",
+    "poison_damage": "poison proc damage",
+    "lightning_damage": "lightning proc damage",
+    "fire_damage": "fire proc damage",
 }
 
 

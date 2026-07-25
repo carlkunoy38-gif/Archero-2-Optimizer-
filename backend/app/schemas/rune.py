@@ -6,7 +6,16 @@ import datetime as dt
 
 from pydantic import BaseModel, ConfigDict
 
-from app.domain.models.enums import Rarity, RuneType
+from app.domain.models.enums import EffectType, Rarity, RuneType
+
+
+class RuneEffectRead(BaseModel):
+    """Serialized representation of one `RuneEffect` row."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    effect_type: EffectType
+    value: float
 
 
 class RuneRead(BaseModel):
@@ -19,6 +28,6 @@ class RuneRead(BaseModel):
     rune_type: RuneType
     rarity: Rarity
     effect_description: str | None
-    effect_value: float
+    effects: list[RuneEffectRead]
     created_at: dt.datetime
     updated_at: dt.datetime
