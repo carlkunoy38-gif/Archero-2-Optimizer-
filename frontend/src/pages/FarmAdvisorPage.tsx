@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/apiClient'
 import type { ChapterAdviceResponse, ObjectiveName } from '../lib/types'
@@ -9,7 +9,7 @@ const OBJECTIVES: { value: ObjectiveName; label: string; hint: string }[] = [
   {
     value: 'farm',
     label: 'Farm (repeatable)',
-    hint: 'Ranks chapters by safe, energy-efficient repeatability — the best chapter to grind.',
+    hint: 'Ranks chapters by safe, energy-efficient repeatability — not by gold/hour or drop rates, which this project has no data on yet.',
   },
   {
     value: 'balanced',
@@ -26,6 +26,14 @@ export function FarmAdvisorPage() {
   const [result, setResult] = useState<ChapterAdviceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // A recommendation only ever matches the inputs it was computed for —
+  // changing any of them makes the last result stale, so clear it rather
+  // than risk it being mistaken for an answer to the new inputs.
+  useEffect(() => {
+    setResult(null)
+    setError(null)
+  }, [accountId, objective])
 
   async function handleAdvise() {
     if (accountId === null) return
@@ -75,6 +83,7 @@ export function FarmAdvisorPage() {
           <Select
             id="farm-mode"
             value={objective}
+            disabled={loading}
             onChange={(e) => setObjective(e.target.value as ObjectiveName)}
           >
             {OBJECTIVES.map((o) => (

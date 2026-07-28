@@ -104,4 +104,39 @@ describe('FarmAdvisorPage', () => {
 
     expect(await screen.findByText('No chapters in the catalog yet')).toBeInTheDocument()
   })
+
+  it('clears a stale recommendation when the mode changes afterward', async () => {
+    mockedUseCurrentAccount.mockReturnValue({ accountId: 1, setAccountId: vi.fn() })
+    mockedApi.adviseChapters.mockResolvedValue({
+      recommended_chapter_id: 18,
+      ranking: [
+        {
+          chapter_id: 18,
+          number: 18,
+          name: 'Whispering Forest',
+          score: 42.1,
+          summary: 'Chapter 18 (Whispering Forest) is a safe, energy-efficient chapter to farm repeatedly.',
+          reasons: [],
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: 'Get recommendation' }))
+    expect(
+      await screen.findByText(
+        'Chapter 18 (Whispering Forest) is a safe, energy-efficient chapter to farm repeatedly.',
+      ),
+    ).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Mode'), 'balanced')
+
+    expect(
+      screen.queryByText(
+        'Chapter 18 (Whispering Forest) is a safe, energy-efficient chapter to farm repeatedly.',
+      ),
+    ).not.toBeInTheDocument()
+  })
 })

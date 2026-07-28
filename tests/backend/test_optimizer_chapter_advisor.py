@@ -16,7 +16,15 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
-from app.domain.models import Chapter, Hero, HeroClass, Rarity, UserAccount, UserHeroOwnership
+from app.domain.models import (
+    Chapter,
+    Hero,
+    HeroClass,
+    Rarity,
+    UserAccount,
+    UserChapterProgress,
+    UserHeroOwnership,
+)
 from app.optimizer import chapter_scoring, objectives, weights
 from app.optimizer.advisors import chapter_advisor
 from app.optimizer.context import BuildContext
@@ -178,10 +186,41 @@ def test_advise_for_account_progression_mode_prefers_furthest_safe_chapter(
     far = Chapter(number=2, name="Far Ridge", recommended_combat_power=950.0, energy_cost=10)
     db.add_all([near, far])
     db.commit()
+    # Chapter 2 is only unlocked once chapter 1 is cleared.
+    db.add(UserChapterProgress(account_id=account.id, chapter_id=near.id, cleared=True))
+    db.commit()
 
     result = chapter_advisor.advise_for_account(db, account.id, objective_name="balanced")
 
     assert result.recommended.option.id == far.id
+
+
+def test_advise_for_account_never_recommends_a_locked_chapter(
+    db: Session, account: UserAccount
+) -> None:
+    account.combat_power = 1000.0
+    near = Chapter(number=1, name="Easy Meadow", recommended_combat_power=400.0, energy_cost=3)
+    far = Chapter(number=2, name="Far Ridge", recommended_combat_power=950.0, energy_cost=10)
+    db.add_all([near, far])
+    db.commit()
+    # Chapter 1 is not cleared yet, so chapter 2 is still locked.
+
+    result = chapter_advisor.advise_for_account(db, account.id, objective_name="balanced")
+
+    assert result.recommended.option.id == near.id
+    assert all(scored.option.id != far.id for scored in result.ranked)
+
+
+def test_advise_for_account_raises_not_found_when_nothing_is_unlocked(
+    db: Session, account: UserAccount
+) -> None:
+    # A chapter catalog that doesn't start at number 1 has nothing this
+    # advisor considers "unlocked" under the sequential-unlock rule.
+    db.add(Chapter(number=5, name="Mystery Chapter", recommended_combat_power=100.0))
+    db.commit()
+
+    with pytest.raises(NotFoundError):
+        chapter_advisor.advise_for_account(db, account.id)
 
 
 def test_advise_for_account_suggests_an_upgrade_when_top_pick_is_unsafe(

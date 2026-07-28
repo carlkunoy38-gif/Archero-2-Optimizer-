@@ -45,10 +45,11 @@ describe('UpgradeAdvisorPage', () => {
   it('requests upgrade advice for the selected account and objective', async () => {
     mockedUseCurrentAccount.mockReturnValue({ accountId: 1, setAccountId: vi.fn() })
     mockedApi.adviseUpgrade.mockResolvedValue({
-      recommended_catalog_id: 5,
+      recommended: { category: 'hero', ownership_id: 9, catalog_id: 5 },
       ranking: [
         {
           category: 'hero',
+          ownership_id: 9,
           catalog_id: 5,
           name: 'Hero',
           from_level: 3,
@@ -85,10 +86,11 @@ describe('UpgradeAdvisorPage', () => {
     // badge both.
     mockedUseCurrentAccount.mockReturnValue({ accountId: 1, setAccountId: vi.fn() })
     mockedApi.adviseUpgrade.mockResolvedValue({
-      recommended_catalog_id: 1,
+      recommended: { category: 'hero', ownership_id: 3, catalog_id: 1 },
       ranking: [
         {
           category: 'hero',
+          ownership_id: 3,
           catalog_id: 1,
           name: 'Test Hero',
           from_level: 10,
@@ -100,6 +102,7 @@ describe('UpgradeAdvisorPage', () => {
         },
         {
           category: 'weapon',
+          ownership_id: 4,
           catalog_id: 1,
           name: 'Dragon Bow',
           from_level: 10,
@@ -137,5 +140,44 @@ describe('UpgradeAdvisorPage', () => {
     expect(
       await screen.findByText('Account 1 has no upgrade worth making right now'),
     ).toBeInTheDocument()
+  })
+
+  it('clears a stale recommendation when the objective changes afterward', async () => {
+    mockedUseCurrentAccount.mockReturnValue({ accountId: 1, setAccountId: vi.fn() })
+    mockedApi.adviseUpgrade.mockResolvedValue({
+      recommended: { category: 'hero', ownership_id: 9, catalog_id: 5 },
+      ranking: [
+        {
+          category: 'hero',
+          ownership_id: 9,
+          catalog_id: 5,
+          name: 'Hero',
+          from_level: 3,
+          to_level: 5,
+          gold_cost: 250,
+          score: 8.7,
+          summary: 'Spend 250 gold to upgrade Hero (level 3 -> 5): expected build improvement +8.7%.',
+          reasons: [],
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: 'Get recommendation' }))
+    expect(
+      await screen.findByText(
+        'Spend 250 gold to upgrade Hero (level 3 -> 5): expected build improvement +8.7%.',
+      ),
+    ).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Objective'), 'farm')
+
+    expect(
+      screen.queryByText(
+        'Spend 250 gold to upgrade Hero (level 3 -> 5): expected build improvement +8.7%.',
+      ),
+    ).not.toBeInTheDocument()
   })
 })

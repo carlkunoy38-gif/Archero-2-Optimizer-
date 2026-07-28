@@ -21,6 +21,7 @@ from app.domain.models import (
     SkillType,
     UserAccount,
     UserArmorOwnership,
+    UserChapterProgress,
     UserHeroOwnership,
     UserWeaponOwnership,
     Weapon,
@@ -269,8 +270,13 @@ def test_advise_upgrade_happy_path_recommends_the_best_affordable_upgrade(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["recommended_catalog_id"] == hero_row.id
+    assert body["recommended"] == {
+        "category": "hero",
+        "ownership_id": body["ranking"][0]["ownership_id"],
+        "catalog_id": hero_row.id,
+    }
     assert body["ranking"][0]["category"] == "hero"
+    assert body["ranking"][0]["ownership_id"]
     assert body["ranking"][0]["reasons"]
     assert body["ranking"][0]["summary"]
 
@@ -321,6 +327,9 @@ def test_advise_chapters_happy_path_recommends_a_chapter(
     near = Chapter(number=1, name="Easy Meadow", recommended_combat_power=400.0, energy_cost=3)
     far = Chapter(number=2, name="Far Ridge", recommended_combat_power=950.0, energy_cost=10)
     db.add_all([near, far])
+    db.commit()
+    # Chapter 2 is only unlocked once chapter 1 is cleared.
+    db.add(UserChapterProgress(account_id=account.id, chapter_id=near.id, cleared=True))
     db.commit()
 
     response = client.post(

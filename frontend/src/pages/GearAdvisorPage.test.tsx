@@ -121,4 +121,34 @@ describe('GearAdvisorPage', () => {
 
     expect(await screen.findByText('Account 1 owns no ring to compare')).toBeInTheDocument()
   })
+
+  it('clears a stale recommendation when the category changes afterward', async () => {
+    mockedUseCurrentAccount.mockReturnValue({ accountId: 1, setAccountId: vi.fn() })
+    mockedApi.adviseGear.mockResolvedValue({
+      recommended_catalog_id: 100,
+      ranking: [
+        {
+          category: 'weapon',
+          catalog_id: 100,
+          name: 'Dragon Bow',
+          is_currently_equipped: false,
+          score: 92.3,
+          summary: 'Dragon Bow is the strongest option.',
+          reasons: [],
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: 'Get recommendation' }))
+    expect(await screen.findByText('Dragon Bow is the strongest option.')).toBeInTheDocument()
+
+    // Switching category without re-running the calculation must not
+    // leave the old (now-mismatched) recommendation on screen.
+    await user.selectOptions(screen.getByLabelText('Category'), 'ring')
+
+    expect(screen.queryByText('Dragon Bow is the strongest option.')).not.toBeInTheDocument()
+  })
 })

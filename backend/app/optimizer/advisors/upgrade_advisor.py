@@ -18,6 +18,22 @@ hypothetical `BuildContext` via `simulator.replace_contribution`
 highest level the account can currently afford) and scores the marginal
 `ObjectiveProfile` gain, expressed as a percentage of the build's
 current objective score — "expected build improvement %."
+
+Only the account's *active/equipped* item per category is ever a
+candidate — a bench hero, an unequipped weapon, an un-slotted rune are
+never considered. This isn't a minor filter: `replace_contribution`'s
+"before" side only makes sense as a *subtraction from the current
+BuildContext*, and `build_context()` only folds in what's actually
+equipped/active in the first place. An unequipped item's "current
+contribution" was never added to the context to begin with, so
+subtracting it and adding the upgraded amount doesn't simulate "upgrade
+this owned-but-unequipped item" at all — it silently stacks the
+item's own level-delta directly onto whatever *is* currently equipped,
+which corresponds to no real action a player can take. Recommending
+"upgrade and equip this bench item" would need to compose an upgrade
+with a Gear Advisor-style swap (a genuinely different simulation this
+advisor doesn't attempt yet), not just widen which candidates it
+scores under the current formula.
 """
 
 from __future__ import annotations
@@ -144,6 +160,8 @@ def _affordable_candidate(
 def _hero_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.heroes:
+        if not ownership.is_active:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.HERO,
             ownership.id,
@@ -161,6 +179,8 @@ def _hero_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _weapon_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.weapons:
+        if not ownership.is_equipped:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.WEAPON,
             ownership.id,
@@ -178,6 +198,8 @@ def _weapon_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _armor_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.armor_pieces:
+        if not ownership.is_equipped:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.ARMOR,
             ownership.id,
@@ -195,6 +217,8 @@ def _armor_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _ring_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.rings:
+        if not ownership.is_equipped:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.RING,
             ownership.id,
@@ -212,6 +236,8 @@ def _ring_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _amulet_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.amulets:
+        if not ownership.is_equipped:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.AMULET,
             ownership.id,
@@ -229,6 +255,8 @@ def _amulet_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _pet_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.pets:
+        if not ownership.is_active:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.PET,
             ownership.id,
@@ -246,6 +274,8 @@ def _pet_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
 def _rune_candidates(account: UserAccount, gold: float) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     for ownership in account.runes:
+        if not ownership.is_equipped:
+            continue
         candidate = _affordable_candidate(
             UpgradeCategory.RUNE,
             ownership.id,
@@ -300,8 +330,12 @@ def advise(
     candidates: Sequence[_Candidate],
     objective: ObjectiveProfile = objectives.BALANCED,
 ) -> AdvisorResult[UpgradeOption]:
-    """Rank every affordable upgrade candidate, best first. Ties break
-    on catalog id ascending, same as every other advisor."""
+    """Rank every affordable upgrade candidate, best first. Ties break on
+    `(category, catalog_id, ownership_id)` ascending — unlike every
+    other advisor's single-category ranking, `catalog_id` alone is not
+    unique here (a `Hero` and a `Weapon` can share catalog id 1), so
+    breaking ties on it alone would be non-deterministic across
+    categories; `ownership_id` is the final, always-unique tiebreaker."""
 
     if not candidates:
         raise ValueError("advise() requires at least one candidate upgrade")
@@ -310,7 +344,14 @@ def advise(
         score_upgrade(context, option, current, upgraded, objective)
         for option, current, upgraded in candidates
     ]
-    scored.sort(key=lambda scored_option: (-scored_option.score, scored_option.option.catalog_id))
+    scored.sort(
+        key=lambda scored_option: (
+            -scored_option.score,
+            scored_option.option.category.value,
+            scored_option.option.catalog_id,
+            scored_option.option.ownership_id,
+        )
+    )
     return AdvisorResult(ranked=tuple(scored))
 
 
@@ -318,12 +359,13 @@ def advise_for_account(
     db: Session, account_id: int, objective_name: str = "balanced"
 ) -> AdvisorResult[UpgradeOption]:
     """DB-aware entry point: loads the account's build and every
-    upgrade it can currently afford across all seven ownable item
-    types, filters out anything that wouldn't actually improve the
-    build, and delegates to the pure `advise` above. Raises
-    `NotFoundError` (a 404) if nothing is affordable, or if everything
-    affordable is worthless — both real, valid states, not error
-    conditions the caller did anything wrong to reach."""
+    *currently active/equipped* item across all seven ownable
+    categories that it can currently afford to level up, filters out
+    anything that wouldn't actually improve the build, and delegates to
+    the pure `advise` above. Raises `NotFoundError` (a 404) if nothing
+    is affordable, or if everything affordable is worthless — both
+    real, valid states, not error conditions the caller did anything
+    wrong to reach."""
 
     account = account_service.get_account_detail(db, account_id)
     context = build_context(account)

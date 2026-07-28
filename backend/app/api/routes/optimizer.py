@@ -27,6 +27,7 @@ from app.schemas.optimizer import (
     SkillScoreBreakdown,
     UpgradeAdviceRequest,
     UpgradeAdviceResponse,
+    UpgradeRecommendedOption,
     UpgradeScoreBreakdown,
 )
 
@@ -93,6 +94,7 @@ def advise_upgrade(
     ranking = [
         UpgradeScoreBreakdown(
             category=scored.option.category,
+            ownership_id=scored.option.ownership_id,
             catalog_id=scored.option.catalog_id,
             name=scored.option.name,
             from_level=scored.option.from_level,
@@ -106,7 +108,11 @@ def advise_upgrade(
     ]
 
     return UpgradeAdviceResponse(
-        recommended_catalog_id=result.recommended.option.catalog_id,
+        recommended=UpgradeRecommendedOption(
+            category=result.recommended.option.category,
+            ownership_id=result.recommended.option.ownership_id,
+            catalog_id=result.recommended.option.catalog_id,
+        ),
         ranking=ranking,
     )
 

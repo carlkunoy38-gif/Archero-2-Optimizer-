@@ -980,3 +980,98 @@ for now, which is honest given what's known, not a claim that they play identica
 Heroes, weapons, armor, rings, amulets, pets, skills, and chapters still have zero
 seeded rows — runes are the first catalog entity with real data, not the last one
 needed; see the root README's "Game data" section for what's still outstanding.
+
+## Module 6.1: correctness hardening
+
+A review pass across the freshly-built Gear/Upgrade/Farm Advisor stack found one
+critical scoring bug, an API contract ambiguity, a missing progression constraint, and
+a frontend staleness issue. All four are fixed here, each with a regression test that
+reproduces the original problem.
+
+### The bug: Upgrade Advisor was scoring items that weren't equipped
+
+`build_context()` only folds an *equipped/active* item's stats into `BuildContext` —
+a bench hero, an unequipped weapon, an un-slotted rune contribute nothing to
+`context.attack`/`context.defense`/etc., by design (see "Layering inside
+`app/optimizer/`" above). Upgrade Advisor's candidate builders, though, iterated
+*every owned* item regardless of equip state, and `score_upgrade` called
+`simulator.replace_contribution(context, before=current_contribution,
+after=upgraded_contribution)` for each one. For an equipped item this is exactly
+right: `current_contribution` is the same number already baked into `context`, so
+subtracting it and adding the upgraded amount is a correct simulation. For an
+*unequipped* item, `current_contribution` was never part of `context` to begin with —
+subtracting a number that isn't there and adding the upgraded one doesn't simulate
+"upgrade this owned-but-unequipped item" at all. It silently stacks the item's own
+level-delta directly onto whatever build *is* currently active, corresponding to no
+real action a player can take. Concretely: an account with a 300-attack equipped
+Dragon Bow and an unequipped, much-stronger Bright Spear would see
+"upgrading" the Bright Spear reported as raising the account's `attack` from 300 to
+700 — the Spear's entire upgrade delta, added on top of a weapon it isn't even
+replacing.
+
+**Fix**: every one of the seven candidate builders in
+`app/optimizer/advisors/upgrade_advisor.py` now skips any ownership row that isn't
+the active hero / equipped weapon / equipped armor piece / equipped ring / equipped
+amulet / active pet / equipped rune. Recommending "upgrade *and* equip this bench
+item" is a genuinely different simulation (an upgrade composed with a Gear-Advisor-
+style swap) that this advisor doesn't attempt yet — the module docstring says so
+explicitly, so a future version knows what it would need to add rather than assuming
+the current formula just needs wider candidates.
+`test_advise_for_account_never_scores_an_unequipped_weapon` reproduces the exact
+Dragon-Bow-vs-Bright-Spear scenario and asserts the unequipped item never appears in
+the ranking at all.
+
+### The API's `catalog_id` was ambiguous across categories
+
+Every other advisor's response ranks candidates from a single category (one call to
+Gear Advisor is always "weapons," or always "rings," never mixed), so `catalog_id`
+alone identifies a row. Upgrade Advisor's response spans all seven categories in one
+list, and `catalog_id` is a per-table primary key — a `Hero` row and a `Weapon` row
+can both be catalog id 1. `UpgradeScoreBreakdown` now also carries `ownership_id` (the
+account's actual ownership row id, the real unique player resource), and
+`UpgradeAdviceResponse.recommended_catalog_id` (a single, ambiguous int) is replaced
+with `recommended: {category, ownership_id, catalog_id}` — `(category, ownership_id)`
+together is the only combination that's always unique. `advise()`'s tie-break sort key
+changed to match: `(-score, category, catalog_id, ownership_id)` rather than
+`(-score, catalog_id)` alone, since two candidates from different categories could
+otherwise tie-break inconsistently depending on iteration order. The frontend already
+matched "recommended" by ranking position (`index === 0`, fixed in the previous
+commit for the same underlying ambiguity) rather than by id, so this schema change
+needed no behavior change there — just updated types.
+
+### Chapter Advisor could recommend a chapter the account hasn't unlocked
+
+`advise_for_account` scored *every* catalog chapter, with no check against the
+account's actual progression — it could recommend a chapter several stages beyond
+anything the player has reached, in either farm or progression mode. There is no
+`Chapter.is_unlocked` column in the catalog (no richer unlock mechanic — side-quest
+unlocks, VIP skips — has real data behind it yet), so `chapter_advisor._unlocked_
+chapters` applies the standard sequential-unlock assumption instead: chapter 1 is
+always unlocked, and any other chapter unlocks once the chapter immediately before it
+(by `number`) has `UserChapterProgress.cleared = True`. `advise_for_account` now ranks
+only unlocked chapters, for both farm and progression mode, and raises `NotFoundError`
+if the account hasn't unlocked any (e.g. a chapter catalog that doesn't start at
+number 1 under this rule) — the same "real, valid state, not an error the caller did
+anything wrong to reach" pattern every other advisor's `NotFoundError` case follows.
+
+### Frontend: a stale recommendation could survive an input change
+
+`GearAdvisorPage`/`UpgradeAdvisorPage`/`FarmAdvisorPage` cleared their `result` state
+at the *start* of a new calculation, but not when the user changed an input
+(category, armor slot, objective, or switched account) without re-running it — the
+previous answer stayed on screen, looking like it applied to the new selection. Each
+page now has a `useEffect` that clears `result`/`error` whenever any input the
+calculation depends on changes, and disables its `<Select>`s while a request is in
+flight (so an in-flight request can't be raced by an input change before its response
+lands). A regression test per page changes an input after a successful calculation
+and asserts the old summary text is gone.
+
+### What's still explicitly out of scope
+
+This pass fixed correctness bugs in the existing model, not the model's known scope
+limits: Upgrade Advisor still spends an account's entire current gold on one item
+using a placeholder linear gold-cost curve (no scrolls/duplicates/fusion/rarity, as
+already noted for Module 5), and Farm Advisor still ranks by safety and energy
+efficiency, not by actual gold/XP/drop rewards this project has no data for — both
+remain accurately described as such in their own UI copy and docstrings, not silently
+overstated.

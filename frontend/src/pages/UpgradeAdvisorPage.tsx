@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/apiClient'
 import type { ObjectiveName, UpgradeAdviceResponse } from '../lib/types'
@@ -18,6 +18,14 @@ export function UpgradeAdvisorPage() {
   const [result, setResult] = useState<UpgradeAdviceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // A recommendation only ever matches the inputs it was computed for —
+  // changing any of them makes the last result stale, so clear it rather
+  // than risk it being mistaken for an answer to the new inputs.
+  useEffect(() => {
+    setResult(null)
+    setError(null)
+  }, [accountId, objective])
 
   async function handleAdvise() {
     if (accountId === null) return
@@ -67,6 +75,7 @@ export function UpgradeAdvisorPage() {
           <Select
             id="upgrade-objective"
             value={objective}
+            disabled={loading}
             onChange={(e) => setObjective(e.target.value as ObjectiveName)}
           >
             {OBJECTIVES.map((o) => (
@@ -103,7 +112,7 @@ function ResultPanel({ result }: { result: UpgradeAdviceResponse }) {
           const isRecommended = index === 0
           return (
             <div
-              key={`${scored.category}-${scored.catalog_id}`}
+              key={`${scored.category}-${scored.ownership_id}`}
               className={`rounded-md border p-3 ${
                 isRecommended ? 'border-emerald-600 bg-emerald-950/40' : 'border-slate-800 bg-slate-950/40'
               }`}

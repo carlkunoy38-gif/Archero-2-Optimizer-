@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
-from app.domain.models import Chapter
+from app.domain.models import Chapter, UserChapterProgress
 from app.optimizer import chapter_scoring, objectives
 from app.optimizer.advisors import upgrade_advisor
 from app.optimizer.context import BuildContext, build_context
@@ -95,6 +95,35 @@ def advise(
     return AdvisorResult(ranked=tuple(scored))
 
 
+def _unlocked_chapters(
+    chapters: Sequence[Chapter], progress: Sequence[UserChapterProgress]
+) -> list[Chapter]:
+    """Chapters the account can actually attempt right now: chapter 1
+    is always unlocked, and any other chapter is unlocked once the
+    chapter immediately before it (by `number`) has been cleared.
+
+    There is no `Chapter.is_unlocked`/`Chapter.unlock_requirement`
+    column in the catalog — this is the standard sequential-unlock
+    assumption for a story-mode chapter list (matching how `number` is
+    described: "a story-mode chapter used to gauge farming/boss
+    difficulty"), not a transcription of a richer real unlock mechanic
+    (side-quest unlocks, VIP skips, ...) this project has no data for.
+    Without this filter, both farm and progression mode could recommend
+    a chapter the account has never actually reached.
+    """
+
+    cleared_numbers = {
+        chapter.number
+        for chapter in chapters
+        if any(p.chapter_id == chapter.id and p.cleared for p in progress)
+    }
+    return [
+        chapter
+        for chapter in chapters
+        if chapter.number == 1 or (chapter.number - 1) in cleared_numbers
+    ]
+
+
 def _with_upgrade_suggestion(
     top: ScoredOption[Chapter], upgrade_top: ScoredOption[upgrade_advisor.UpgradeOption]
 ) -> ScoredOption[Chapter]:
@@ -112,10 +141,11 @@ def advise_for_account(
     db: Session, account_id: int, objective_name: str = "balanced"
 ) -> AdvisorResult[Chapter]:
     """DB-aware entry point: loads the account's build and every
-    catalog chapter (raising `NotFoundError` for a missing account, an
-    unknown objective name, or an empty chapter catalog), delegates to
-    the pure `advise` above, then — in progression mode, when the top
-    pick isn't currently safe — folds in the Upgrade Advisor's top
+    catalog chapter *the account has actually unlocked* (raising
+    `NotFoundError` for a missing account, an unknown objective name, an
+    empty chapter catalog, or nothing unlocked yet), delegates to the
+    pure `advise` above, then — in progression mode, when the top pick
+    isn't currently safe — folds in the Upgrade Advisor's top
     recommendation rather than leaving the player with no next step."""
 
     account = account_service.get_account_detail(db, account_id)
@@ -126,7 +156,11 @@ def advise_for_account(
     if not chapters:
         raise NotFoundError("No chapters in the catalog yet")
 
-    result = advise(context, chapters, objective)
+    unlocked = _unlocked_chapters(chapters, account.chapter_progress)
+    if not unlocked:
+        raise NotFoundError(f"Account {account_id} has not unlocked any chapters yet")
+
+    result = advise(context, unlocked, objective)
 
     if objective.name != "farm":
         top = result.recommended

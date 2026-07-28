@@ -320,6 +320,10 @@ export interface UpgradeAdviceRequest {
 
 export interface UpgradeScoreBreakdown {
   category: UpgradeCategory
+  // The account's actual ownership row id — catalog_id alone isn't
+  // unique across categories (a Hero and a Weapon can share catalog
+  // id 1), since one response spans every ownable category at once.
+  ownership_id: number
   catalog_id: number
   name: string
   from_level: number
@@ -330,8 +334,14 @@ export interface UpgradeScoreBreakdown {
   reasons: string[]
 }
 
+export interface UpgradeRecommendedOption {
+  category: UpgradeCategory
+  ownership_id: number
+  catalog_id: number
+}
+
 export interface UpgradeAdviceResponse {
-  recommended_catalog_id: number
+  recommended: UpgradeRecommendedOption
   ranking: UpgradeScoreBreakdown[]
 }
 

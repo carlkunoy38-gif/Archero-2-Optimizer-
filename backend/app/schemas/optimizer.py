@@ -77,6 +77,13 @@ class UpgradeAdviceRequest(BaseModel):
 
 class UpgradeScoreBreakdown(BaseModel):
     category: UpgradeCategory
+    #: The account's actual ownership row id — the real, unambiguous
+    #: player resource being upgraded. `catalog_id` alone is *not*
+    #: unique across categories (a `Hero` row and a `Weapon` row can
+    #: both be catalog id 1), since a single Upgrade Advisor response
+    #: spans every ownable category at once, unlike Gear Advisor's
+    #: single-category ranking.
+    ownership_id: int
     catalog_id: int
     name: str
     from_level: int
@@ -90,8 +97,18 @@ class UpgradeScoreBreakdown(BaseModel):
     reasons: list[str]
 
 
+class UpgradeRecommendedOption(BaseModel):
+    """Unambiguously identifies `ranking[0]` — `(category, ownership_id)`
+    together, never `catalog_id` alone, for the same reason
+    `UpgradeScoreBreakdown.ownership_id` exists."""
+
+    category: UpgradeCategory
+    ownership_id: int
+    catalog_id: int
+
+
 class UpgradeAdviceResponse(BaseModel):
-    recommended_catalog_id: int
+    recommended: UpgradeRecommendedOption
     ranking: list[UpgradeScoreBreakdown]
 
 

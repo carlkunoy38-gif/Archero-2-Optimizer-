@@ -81,6 +81,22 @@ This repository is being built module by module. Completed so far:
       happened to share an id — fixed to match by ranking position instead, with a
       regression test locking it down. See "Gear, Upgrade, and Farm Advisor pages
       (Module 6)" in `docs/architecture.md`.
+- [x] **Module 6.1 — Correctness hardening**: a review pass found and fixed a critical
+      scoring bug (Upgrade Advisor was recommending upgrades for owned-but-unequipped
+      items — e.g. a bench hero or an unequipped weapon — silently stacking that
+      item's stat delta onto whatever build *is* currently active, since
+      `BuildContext` never included the unequipped item's stats to begin with; fixed
+      by scoring only active/equipped items), an API contract ambiguity
+      (`UpgradeAdviceResponse` identified its recommendation by `catalog_id` alone,
+      which isn't unique across categories — a hero and a weapon can share an id —
+      replaced with `recommended: {category, ownership_id, catalog_id}` and
+      `ownership_id` on every ranked row), a missing progression constraint (Chapter
+      Advisor could recommend a chapter the account hasn't unlocked yet — now filtered
+      by a sequential-unlock rule based on `UserChapterProgress.cleared`), and a
+      frontend staleness bug (changing an input without recalculating left the old,
+      now-mismatched recommendation on screen — now cleared on input change). Each fix
+      has a regression test reproducing the original problem. See "Module 6.1:
+      correctness hardening" in `docs/architecture.md`.
 - [ ] **Module 6 (remaining)** — real data for the other eight catalog entities (see
       "Game data" below), and a combined Dashboard summarizing all advisors at once.
 

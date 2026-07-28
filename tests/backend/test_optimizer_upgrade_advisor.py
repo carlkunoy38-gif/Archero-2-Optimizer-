@@ -190,6 +190,42 @@ def test_advise_for_account_never_recommends_an_unaffordable_upgrade(
         upgrade_advisor.advise_for_account(db, account.id)
 
 
+def test_advise_for_account_never_scores_an_unequipped_weapon(
+    db: Session, account: UserAccount
+) -> None:
+    # A strong owned-but-unequipped weapon must never be a candidate:
+    # its "current contribution" was never folded into the account's
+    # BuildContext (build_context only reads equipped items), so
+    # simulating its upgrade would silently stack the level-delta onto
+    # whatever *is* equipped instead — see the module docstring.
+    account.gold = 10_000
+    equipped = Weapon(
+        name="Dragon Bow", weapon_type="bow", rarity=Rarity.RARE, base_damage=50.0
+    )
+    unequipped = Weapon(
+        name="Bright Spear", weapon_type="spear", rarity=Rarity.LEGENDARY, base_damage=1000.0
+    )
+    db.add_all([equipped, unequipped])
+    db.commit()
+    db.add(
+        UserWeaponOwnership(
+            account_id=account.id, weapon_id=equipped.id, level=10, is_equipped=True
+        )
+    )
+    db.add(
+        UserWeaponOwnership(
+            account_id=account.id, weapon_id=unequipped.id, level=10, is_equipped=False
+        )
+    )
+    db.commit()
+
+    result = upgrade_advisor.advise_for_account(db, account.id)
+
+    scored_names = {scored.option.name for scored in result.ranked}
+    assert "Bright Spear" not in scored_names
+    assert "Dragon Bow" in scored_names
+
+
 def test_advise_for_account_raises_not_found_for_missing_account(db: Session) -> None:
     with pytest.raises(NotFoundError):
         upgrade_advisor.advise_for_account(db, 999999)

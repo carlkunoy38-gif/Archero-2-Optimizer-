@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/apiClient'
 import type { ArmorSlot, GearAdviceResponse, GearCategory, ObjectiveName } from '../lib/types'
@@ -35,6 +35,14 @@ export function GearAdvisorPage() {
   const [result, setResult] = useState<GearAdviceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // A recommendation only ever matches the inputs it was computed for —
+  // changing any of them makes the last result stale, so clear it rather
+  // than risk it being mistaken for an answer to the new inputs.
+  useEffect(() => {
+    setResult(null)
+    setError(null)
+  }, [accountId, category, armorSlot, objective])
 
   async function handleAdvise() {
     if (accountId === null) return
@@ -88,6 +96,7 @@ export function GearAdvisorPage() {
             <Select
               id="gear-category"
               value={category}
+              disabled={loading}
               onChange={(e) => setCategory(e.target.value as GearCategory)}
             >
               {CATEGORIES.map((c) => (
@@ -106,6 +115,7 @@ export function GearAdvisorPage() {
               <Select
                 id="gear-armor-slot"
                 value={armorSlot}
+                disabled={loading}
                 onChange={(e) => setArmorSlot(e.target.value as ArmorSlot)}
               >
                 {ARMOR_SLOTS.map((s) => (
@@ -124,6 +134,7 @@ export function GearAdvisorPage() {
             <Select
               id="gear-objective"
               value={objective}
+              disabled={loading}
               onChange={(e) => setObjective(e.target.value as ObjectiveName)}
             >
               {OBJECTIVES.map((o) => (
